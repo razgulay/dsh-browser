@@ -208,16 +208,59 @@ git push origin v<version>-forkmerge
 
 ## Tình huống: graydovee cập nhật
 
-**Đừng merge nhánh hắn.** Nhánh đó dựa trên nền cũ; merge sẽ kéo lùi hàng loạt
-file upstream. Thay vào đó:
+**Tuyệt đối không `git merge graydovee/main`.** Nhánh đó rẽ từ lâu và đi theo
+hướng khác. Số đo ngày 2026-11-22: `graydovee/main` có 94 commit mà upstream
+không có, và thiếu 46 commit upstream đã có (mà bản ta đã lấy trọn). Merge sẽ
+kéo lùi `background/tools.ts`, `content/actions.ts`, `server.ts`, clipboard và
+panel về trạng thái cũ. Đó là hạ cấp, không phải nâng cấp.
+
+Cách làm đúng là **tỉa (cherry-pick) từng commit**. Chạy:
 
 ```powershell
 git fetch graydovee
-git log --oneline graydovee-main..graydovee/main
+git log --oneline pointer-restore..graydovee/main           # commit đáng xem
+git log --stat pointer-restore..graydovee/main              # kèm file
 ```
 
-Xem hắn thêm gì. Nếu chỉ bump version, bỏ qua. Nếu có tính năng pointer mới,
-`git cherry-pick` từng commit.
+Với mỗi commit, quyết theo bảng sau. Không tự phán mỗi lần — dùng đúng tiêu chí
+này để kết quả nhất quán.
+
+### Lấy (cherry-pick)
+
+- Sửa **hành vi** của tầng pointer: toạ độ, gesture, wheel delta, iframe
+  geometry, input routing, trusted-input channel.
+- Sửa bug có test đi kèm chứng minh được (diff thêm `*.spec.ts` cùng lúc).
+- Sửa security trong `trusted-origins.ts`, `extension-origins.ts`,
+  `discovery-cors.ts`.
+- Thêm tool/param mới vào `packages/browser/bridge-browser/src/tools.ts` mà
+  upstream không có.
+
+### Bỏ qua
+
+- Bump version, tag, `CHANGELOG*`, README (cả `.zh`), `AGENTS.md`, `.agents/`.
+- Đổi URL repo, badge, sponsor link, CI runner, `.gitignore`.
+- Viết lại file mà bản ta **đã vượt qua**: `server.ts` (upstream đã đơn giản
+  hoá `settleTool`), `clipboard*` (upstream có pipeline mới), `panel/App.tsx`
+  (upstream có UI polish mới), `background/input-state.ts`.
+- Bất kỳ commit nào có diff chạm > 3 file không liên quan pointer.
+
+### Nghi ngờ → không lấy
+
+Nếu commit vừa sửa pointer vừa đụng file ta đã lấy từ upstream, xử lý như sau:
+đọc diff, tách phần pointer bằng tay, **không cherry-pick nguyên commit**. Nếu
+không tách được sạch thì bỏ. Thà thiếu một tính năng nhỏ còn hơn kéo lùi cả nền.
+
+### Sau khi tỉa
+
+Luôn chạy lại toàn bộ bước 6 (kiểm chứng bắt buộc) và bước 9 (nghiệm thu bằng
+tay) của runbook này. Cherry-pick không conflict **không** đồng nghĩa còn đúng
+hành vi — có thể compile được mà toạ độ đã sai.
+
+### Ghi lại kết quả
+
+Với mỗi lần tỉa, ghi một dòng vào `CHANGELOG.md` và `.zh-CN` (theo quy ước
+repo): lấy commit nào của graydovee, vì sao, bỏ commit nào. Lần sau khỏi phải
+đánh giá lại từ đầu.
 
 ## Bẫy đã gặp, đừng lặp lại
 
