@@ -308,10 +308,24 @@ try {
     assert.equal((await rpc('session.state', { sessionId: entry.sessionId })).active, false,
       'browsing history and composer directories must leave the Agent inactive')
     if (entry.failCleanup) {
-      // 暂时撤销隔离仓库配置的读取权限，验证真实 Git 失败后的归档恢复和重试。
+      // 撤销隔离仓库配置的读取能力，验证真实 Git 失败后的归档恢复和重试。
+      // POSIX 用 chmod 0 即可；Windows 的 NTFS 忽略 POSIX 权限位，改为把
+      // config 替换成一个目录——Git 读取配置时同样会失败。
       const gitConfig = join(worktreeRepository, '.git/config')
-      const configMode = (await stat(gitConfig)).mode
-      await chmod(gitConfig, 0)
+      const portable = process.platform === 'win32'
+      const configMode = portable ? undefined : (await stat(gitConfig)).mode
+      const configBytes = portable ? await readFile(gitConfig) : undefined
+      const breakConfig = async () => {
+        if (!portable) return chmod(gitConfig, 0)
+        await rm(gitConfig, { force: true })
+        await mkdir(gitConfig)
+      }
+      const restoreConfig = async () => {
+        if (!portable) return chmod(gitConfig, configMode)
+        await rm(gitConfig, { recursive: true, force: true })
+        await writeFile(gitConfig, configBytes)
+      }
+      await breakConfig()
       try {
         const failed = await rpc.request(BRIDGE_SESSION_PURGE_METHOD, { sessionId: entry.sessionId })
         assert.equal(failed.ok, false, JSON.stringify(failed))
@@ -320,7 +334,7 @@ try {
         assert.ok((await rpc('session.list', {})).items.some(item => item.sessionId === entry.sessionId))
         assert.ok((await rpc('session.history', { sessionId: entry.sessionId })).events.length > 0)
       } finally {
-        await chmod(gitConfig, configMode)
+        await restoreConfig()
       }
       await rm(`${marker}.cleanup-${entry.sessionId}`)
     }
@@ -349,11 +363,16 @@ try {
   // the inbox across disposal changes this row and must update the expectation
   // deliberately, instead of silently dropping the pending page context.
   const shutdown = reopened.slice(history.events.length)
-  assert.equal(shutdown.length, 1, `restart must record one inbox splice: ${JSON.stringify(shutdown)}`)
-  const splice = shutdown[0]?.event
-  assert.equal(splice?.type, 'agent/inbox/spliced')
-  assert.equal(splice.data.outcome, 'canceled')
-  assert.equal(splice.data.removedCount, 1)
+  // Windows has no SIGTERM: Node terminates the child outright, so the graceful
+  // agent-loop teardown never runs and no inbox splice is recorded. The contract
+  // below is POSIX-only by construction, not by preference.
+  if (process.platform !== 'win32') {
+    assert.equal(shutdown.length, 1, `restart must record one inbox splice: ${JSON.stringify(shutdown)}`)
+    const splice = shutdown[0]?.event
+    assert.equal(splice?.type, 'agent/inbox/spliced')
+    assert.equal(splice.data.outcome, 'canceled')
+    assert.equal(splice.data.removedCount, 1)
+  }
   const reopenedLegacy = await rpc('session.history', { sessionId: legacySessionId })
   // 历史订阅保持被动读取，迁移后的历史前缀保持一致。
   assert.deepEqual(reopenedLegacy.events.slice(0, migrated.events.length), migrated.events)
