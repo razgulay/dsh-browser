@@ -62,6 +62,17 @@ powershell scripts/install.ps1          # 安装/升级（Windows）：同上，
 
 桥插件契约或 wire 帧有改动时，`pnpm run test` 之外必须跑一次 `node scripts/smoke-runtime.mjs`；它用真实 dsh 校验扩展依赖的每个 Host 方法与失败语义。
 
+## 升级前必读
+
+本仓库当前的维护形态与上游默认假设不同：`pointer-restore` 分支是「上游 v0.1.7 + graydovee 的 input pointer 层」的合并产物，而上游已主动删除该 pointer 层。**任何升级都必须先读 `.agents/notes/upgrade-runbook.md`**，它给出：
+
+- 需要保护的 11 个 pointer 层文件清单（merge 时取 ours，其余取 theirs）；
+- 完整升级、验证、安装、手动验收步骤；
+- 已踩过的 Windows 平台陷阱（`chmod` 无效、无 graceful SIGTERM、`install.ps1` 需 BOM、junction 不能用 `Copy-Item`）；
+- 判断 pointer 层是否仍存活的快速检查命令。
+
+不要只凭 `git merge upstream/main` 的结果直接发布：该 merge 会静默移除 pointer 层，且测试仍可能通过。
+
 ## Coding Style & Naming Conventions
 
 - TypeScript 严格模式；扩展面板不直接访问网络或桥，一切 RPC 经 background port 转发。
