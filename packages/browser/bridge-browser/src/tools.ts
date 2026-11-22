@@ -229,7 +229,7 @@ function defineTools(call: Call, options: BrowserToolsOptions): ToolDefinition[]
 
   const scroll = (): ToolDefinition => defineTool({
     name: 'browser_scroll',
-    description: 'Scroll the page or a container with direction/amount. With point, send a real wheel gesture at those frame-local coordinates (canvas zoom/pan); the page must be the active tab in a focused window, so pair it with browser_follow_tab { activate: true }. Add modifiers for pinch/zoom shortcuts.',
+    description: 'Scroll the page or an iframe up, down, top, or bottom; amount is optional pixels. index/selector scrolls the nearest scrollable container of that element.',
     parameters: {
       direction: { type: 'string', required: true, enum: ['up', 'down', 'top', 'bottom'], description: 'Scroll direction.' },
       amount: { type: 'number', description: 'Number of pixels to scroll; ignored for top and bottom.' },
