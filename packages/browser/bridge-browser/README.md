@@ -2,18 +2,15 @@
 
 English | [中文](README.zh.md)
 
-The **browser-operation bridge** for dsh: mounts a token-authenticated WebSocket carrier (`/ext/bridge`) that the Chrome extension connects to, projects its calls onto dsh 0.2 Typert Remotes, follows Session and Remote Event streams per connection, and registers the text-only `browser_*` tool set that reads and operates the user's active tab through the extension — click elements, fill forms, scroll, and navigate in the real browser, login state preserved. The side panel is the conversation entry; the tools are the product.
+The **browser-operation bridge** for dsh mounts a token-authenticated WebSocket carrier (`/ext/bridge`) for the browser extension, projects its calls onto DSH Typert Remotes, follows Session and Remote Event streams, and registers tools for reading and operating the controlled tab, capturing screenshots, and using developer tools. The browser retains its login state, and the side panel provides the conversation UI.
 
-**Text-only browser tools, multimodal chat passthrough**: page snapshots stay structured text (title, main content, numbered interactive inventory, and masked form fields), and every browser action uses stable inventory numbers. The generic RPC carrier also passes dsh 0.2 image prompts and durable attachment reads; deferred new sessions expose image limits only when the host actually mounts the attachment service.
-
-User-visible changes per release are recorded in [../../../CHANGELOG.md](../../../CHANGELOG.md).
+Page snapshots contain structured text with numbered controls and masked form fields. Actions target element numbers or selectors. Screenshots and chat images use DSH's durable attachment service; deferred sessions expose image limits when the host mounts that service.
 
 ## Config
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `token` | `string` | generated | Fixed bearer token. When absent, a token is generated on first boot, persisted at `~/.dsh/ext-bridge-token` (chmod 0600), and printed in the boot log. |
-| `trustedExtensionOrigins` | `string[]` | shipped extension id | Exact `chrome-extension://<id>` origins allowed to skip the token on loopback. The default pins the id derived from the extension manifest `key` (public — the pin stops incidental cross-extension access, not deliberate key-cloning impersonation); every other origin must present the token. `[]` disables the exemption (hardened mode: pair the token). Invalid entries fail startup. |
+| `token` | `string` | generated | Fixed bearer token. When absent, a token is generated on first boot and saved to `~/.dsh/ext-bridge-token` (chmod 0600). The boot log shows the file path. |
 | `toolTimeoutMs` | `number` | 90000 | Per-tool-call budget, leaving time for the extension's 60-second approval window. |
 | `snapshotMaxChars` | `number` | 32000 | Upper bound on one rendered snapshot's characters, minimum 500 (also negotiated to the extension via `hello.ok` caps). |
 | `maxInteractiveItems` | `number` | 60 | Upper bound on interactive inventory items per snapshot. |
@@ -27,31 +24,15 @@ Workspace grouping is best-effort. If the composition has no workspace domain, d
 
 ## Usage
 
-The remote installer downloads an installer-managed workspace, builds the plugin, and registers its official bundle in the local dsh `web` profile. It requires neither Git nor a local clone:
+See the root README for [installation, updates, startup, and uninstall](../../../README.md#detailed-installation-and-usage).
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/install.sh | bash
-cd ~/.dsh/dsh-browser && pnpm start
-```
+## Development
 
-On Windows, run the PowerShell installer instead:
+The package declares `dsh.bundle.patch` as `./cordis.patch.yml`. The installer registers the local package in the `web` profile, which loads that patch.
 
-```powershell
-$s="$env:TEMP\dsh-install.ps1"; irm https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/install.ps1 -OutFile $s; powershell -NoProfile -ExecutionPolicy Bypass -File $s
-cd $HOME\.dsh\dsh-browser; pnpm start
-```
+The bridge and extension share one pnpm workspace. Bridge source imports `@deepseek-ai/cordis` and `@deepseek-ai/schemastery` directly, and its DSH dependencies match the workspace's pinned release. The root build builds the bridge before the extension.
 
-Developers can instead clone the repository and run `./scripts/install.sh` followed by `pnpm start` from that checkout. The local mode uses the current branch without downloading or overwriting source files. Both installation modes register the same profile bundle; build tools resolve only from the selected workspace and never from a parent checkout or parent `node_modules` directory.
-
-This release is adapted to and verified against dsh 0.2.1-rc.3; 0.2.1-rc.2 exposes the same plugin interfaces and stays supported, while older DSH releases are not supported:
-
-```sh
-npx @deepseek-ai/dsh@0.2.1-rc.3 web
-```
-
-The package manifest declares that support itself: `engines.dsh` (`^0.2.1-rc.2`) and `dsh.manifestVersion: 1` let dsh refuse an incompatible host before loading the plugin, and the Plugins page reads the localized title and description from `locale/en.json` / `locale/zh.json` plus the icon from `icon.svg` without activating the plugin.
-
-The installer copies the unpacked extension to `~/.dsh/browser-extension` and opens `chrome://extensions`. Load that stable directory in Chrome and use the side panel. The shipped extension carries a stable manifest `key`, so its id — and therefore its token-exempt loopback access — stays constant across reinstalls and updates. Updating from an older build changes the id once (settings are stored per id): re-enter the bridge address and token in the panel if you had configured a remote bridge. Other installed extensions are not exempt and must present the configured bearer token; non-loopback deployments always require it.
+The package manifest declares that support itself: `engines.dsh` (`^0.2.2-rc.5`) and `dsh.manifestVersion: 1` let dsh refuse an incompatible host before loading the plugin, and the Plugins page reads the localized title and description from `locale/en.json` / `locale/zh.json` plus the icon from `icon.svg` without activating the plugin.
 
 ## Host methods the panel drives
 
@@ -68,6 +49,10 @@ offered to the model as tools.
 | `commands.list` | `{ sessionId }` | `commands/list` scoped to the Session's agent | `{ commands: [{ name, description, hint?, definitionId? }], provisional }` |
 | `commands.execute` | `{ sessionId, line }` | `commands/execute` with the empty attachment list | `{ commandId, result }`; an unknown line is a `bad-request` |
 | `skills.list` | `{ sessionId }` | `skills/list` for the Session composition | `{ skills: [{ name, description, whenToUse?, modelInvocable, path? }], provisional }` |
+
+Opening `session.history` activates the Session through `session/follow`; requests with `beforeSeq` use `session/events` for older pages. `session/observeState` supplies the bridge's `session/state` events, and `session/observeProjections` supplies `session/projection` events with `{ sessionId, seq, changes }`.
+
+`session.attachment` takes `{ sessionId, attachment }` with the complete image reference. When the `conversationContinuation` projection permits it and the Session is idle, the panel continues with `session.prompt` and `content: []`. Session deletion waits for the Host's archive-triggered worktree cleanup before removing its log.
 
 Failure semantics: a Host that does not mount the permission service answers
 `session.permissions` with `routable: false` instead of failing, so the panel
@@ -95,18 +80,16 @@ permission switch and answers `provisional-session` for everything else.
 - The bridge route lives **outside** the `/api` trust fence (which only guards client-connection's routes), so it carries its own bearer-token authentication: the first frame must be `hello` with the token within 5s, verified in constant time. Failed auth closes the socket.
 - Gateway methods the `/api` carrier pins to loopback (`settings.*`, `credentials.*`, `host.pickDirectory`, `host.openPath`) are refused for non-loopback remotes **even with a valid token** — defense in depth for `--host 0.0.0.0` deployments.
 - One active connection at a time; a new authenticated socket replaces the previous one.
-- The discovery beacon (`/ext/bridge-config` on a fixed loopback port) only names the bridge URL, the host pid, and its start time. It binds `127.0.0.1`, rejects a `Host` header that is not `127.0.0.1`/`localhost` on that port (DNS rebinding), and never carries the bearer token. It is skipped entirely when the host binds a non-loopback interface.
-- Both discovery answers (the host route and the beacon) carry wildcard CORS headers and answer the `OPTIONS` preflight: Chromium 142+ / Edge 143+ Local Network Access routes an extension's loopback fetch through the CORS checks, and without them the extension cannot read the answer at all. A local page can therefore read the advertised topology, which is not a credential — the WebSocket still requires a pinned extension origin or the bearer token.
-- Zero-config loopback skips the token only for origins in `trustedExtensionOrigins` (default: the shipped extension's key-derived id). The manifest `key` is public, so this pins *incidental* access — an extension that deliberately copies the key inherits the id; set `trustedExtensionOrigins: []` and pair the token when hostile extensions are in scope. Origin checks bind browser contexts only — any local process can spoof an `Origin` header (and read the token file), so the bearer token remains the actual boundary. The exemption is loopback-only, but a reverse proxy terminating on 127.0.0.1 (`tailscale serve`, `ssh -L`, nginx) makes proxied clients appear as loopback — use hardened mode for such topologies.
+- The discovery beacon (`/ext/bridge-config` on a fixed loopback port) only names the bridge URL, the host pid, and its start time. It binds `127.0.0.1`, sends no CORS headers (a web page can see the connection but cannot read the body), rejects a `Host` header that is not `127.0.0.1`/`localhost` on that port (DNS rebinding), and never carries the bearer token. It is skipped entirely when the host binds a non-loopback interface.
 - The bridge is a confused-deputy boundary, not a general auth layer: never expose `dsh web --host 0.0.0.0` on untrusted networks.
 - Extracted page text is marked as untrusted model input. Page reads honor the extension's ask/auto/off policy, while state-changing tools require an origin-scoped side-panel decision and fail closed without a panel. Same-origin repetition can be trusted for the current panel session; permanent trust remains an explicit setting.
 
 ## Wire protocol
 
-Frames are JSON objects discriminated by `t`, defined in [`protocol.ts`](src/protocol.ts) — the single source of truth shared with the extension through the workspace package's `./src/*` export. The built package also publishes `@yuxianglin/dsh-bridge-browser/protocol` for external consumers.
+Frames are JSON objects discriminated by `t`, defined in [`protocol.ts`](src/protocol.ts) and shared with the extension through the workspace package's `./src/*` export. The built package exposes `@yuxianglin/dsh-bridge-browser/protocol` for external consumers.
 
 - Client → server: `hello` (auth + caps), `rpc` (gateway method passthrough), `respond` (resolve a host interaction by its RPC id), `tool.result`, `pong`.
-- Server → client: `hello.ok` (echoes negotiated caps), `rpc.result`, `respond.result` (correlated acceptance or error), `event` (bridge-owned projection of dsh Remote streams and waterfalls), `tool.call`, `ping`, `error`.
+- Server → client: `hello.ok` (echoes negotiated caps), `rpc.result`, `respond.result` (correlated acceptance or error), `event` (bridge-owned projection of dsh Remote streams and waterfalls), `tool.call`, `tool.cancel`, `ping`, `error`.
 
 Each `respond` carries a globally unique transport id as well as the host interaction's `rpcId`. The extension routes its receipt only to the panel that initiated it and rejects pending responses on timeout, panel closure, or bridge disconnection.
 
@@ -114,19 +97,19 @@ Each `respond` carries a globally unique transport id as well as the host intera
 
 | Tool | Purpose |
 |---|---|
-| `browser_snapshot` | Structured text snapshot (title/URL/main/inventory/forms); `delta: true` returns only changes, `frame` reads one iframe, and `query` locates elements by text/selector/role with selector and rect. |
-| `browser_click` | Pointer interaction: click/double-click/hover/press/release/drag by index or selector, or at frame-local coordinates (`point`); `trusted: true` asks for real mouse events. |
+| `browser_snapshot` | Structured text snapshot (title/URL/main/inventory/forms); `delta: true` returns only changes, `frame` reads one iframe, and `query` locates elements by text/selector/role and returns their selectors. |
+| `browser_click` | Click or double-click by index or selector; supports mouse buttons and modifiers. |
 | `browser_type` | Enter text by index/selector or into the focused element; `replace` selects existing content first, and `mode` chooses caret insertion or per-character keys. |
 | `browser_press` | Single keys or chords (`modifiers`), `action: down/up` to hold a key across calls, `repeat` to repeat. |
 | `browser_clipboard` / `browser_upload` | Write/paste text and rich HTML; attach local files to a file input (Chrome for system paste and upload). |
-| `browser_scroll` / `browser_navigate` / `browser_open_tab` / `browser_open_window` / `browser_back` / `browser_forward` / `browser_reload` | Page movement; `browser_scroll` with `point` sends a real wheel gesture. |
+| `browser_scroll` / `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | Page scrolling and navigation; `frame` selects an iframe for scrolling. |
 | `browser_get_text` / `browser_wait` | Read regions / settle detection. |
 
-Input delivery: element targeting and plain text stay in the content script and need no debugger. Coordinate clicks, pointer gestures, wheel gestures, real chords, caret insertion, system paste, and file uploads use Chrome's debugger-backed input channel; when the platform has none the call either degrades to synthetic events (marked `(synthetic)` in the result) or fails with `input-unavailable`. Input never activates the tab, focuses the window, or moves the system pointer; `browser_follow_tab { activate: true }` is the only explicit way to bring a page to the front. A wheel gesture requires the page to be the active tab in a focused window (a frozen background page would never answer it, so the guard fails fast with that hint); screenshots need the same focus.
+Clicks, text entry, and scrolling run in the selected document, including cross-origin iframes. Chrome uses its debugger for native keyboard events, caret insertion, system paste, and file uploads. Screenshots require an active tab in a focused window; `browser_follow_tab { activate: true }` brings the controlled page to the front.
 
 ### Developer tools (high privilege)
 
-This group is registered only while the connected extension advertises the `devTools` capability, which Chrome builds do and Firefox builds do not. The extension keeps its own consent in front of every call: unless the user turned on **Allow developer tools** in the side-panel settings, each call asks in the side panel (allow once / trust for this session / deny). The blanket browser-control switch and the persistent origin allowlist deliberately do **not** cover this group.
+This group is registered only while the connected extension advertises the `devTools` capability, which Chrome builds do and Firefox builds do not. Each call requires consent through **Allow developer tools** in Settings, a current side-panel session grant, or a per-call approval (allow once / trust this session / deny). Session trust expires when the last panel closes or the worker restarts. The blanket browser-control switch and the persistent origin allowlist do not cover this group.
 
 | Tool | Purpose |
 |---|---|
@@ -138,22 +121,13 @@ This group is registered only while the connected extension advertises the `devT
 
 Capture notes: Chrome allows only one debugger per tab, so the browser's own DevTools cannot stay open on a tab while capture is attached; the error names that cause. Capture is in-memory, bounded (200 requests, 500 console entries) and resets on attach and on every top-level navigation. All returned page data is untrusted input.
 
-## Model Experience
-
-- **Token effect**: one `browser_snapshot` (default 32k chars) costs roughly 8–10k tokens for typical English text; the exact count depends on language and tokenizer, and delta snapshots cost a fraction of that. The system-prompt section tells the model to snapshot on demand rather than hoard page text.
-- **KV-cache effect**: none beyond ordinary tool results; snapshots are not cached server-side.
-- **Latency**: each action awaits the extension's real-page execution plus settle detection (typically 0.2–2s; navigation up to 5s).
-- **Failure modes**: `bridge-closed` (extension not connected), `timeout`, `no-active-tab`, `content-unavailable` (page needs a refresh), `action-failed` (stale inventory index — the model should re-snapshot).
-
 ## Extension points
 
 - The tool set is the consumer surface; the seam is the bridge wire (`protocol.ts`). Add tools by registering on `ctx.tools` and dispatching over the bridge; the extension's content script dispatches by action name.
 - Negotiated caps (`hello.ok`) let the plugin dictate snapshot budgets to the extension without a shared config file.
 
-## Known Limitations and Deferred Work
+## Known limitations
 
-- One active extension connection (a second window replaces the first).
+- One active extension connection at a time.
 - Accessible cross-origin iframes are snapshotted and operated with stable `(frame, index)` addresses. Restricted or short-lived frames are reported as unavailable without failing the whole page snapshot.
 - Token rotation is manual (edit `~/.dsh/ext-bridge-token` or set `token` in config); no expiry.
-- The Playwright-driven extension e2e self-skips without a usable Chromium executable or a built extension bundle.
-- Approval is enforced in the extension service worker rather than delegated to model behavior. A future dsh tool-pipeline integration may surface the same policy in other clients.

@@ -17,7 +17,6 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, type ToolDefinition, type ToolRunContext } from '@deepseek-ai/dsh-tools'
-import { DEVTOOLS_TOOL_NAMES } from './protocol.ts'
 
 /** Options resolved from plugin config before tool registration. */
 export interface BrowserDevToolsOptions {
@@ -58,7 +57,7 @@ const INDEX_PARAMETER = {
   type: 'number' as const,
   description: 'Element index from the latest browser_snapshot inventory; resolves the same element as its data-dsh-el attribute.',
 }
-const LOCATOR_NOTE = 'Resolve the element with exactly one of selector or index; frame applies to index-based lookup.'
+const LOCATOR_NOTE = 'Resolve the element with exactly one of selector or index; frame selects the document for either locator using the Chrome frame ID from browser_snapshot.'
 const APPROVAL_NOTE = 'Requires the user to allow developer tools (a side-panel approval unless they enabled the developer-tools setting).'
 
 /** Call signature shared with `registerBrowserTools`. */
@@ -265,9 +264,4 @@ export function defineDevTools(call: Call, options: BrowserDevToolsOptions): Too
     getRequest(),
     requestBody(),
   ]
-}
-
-/** The registered names, in the order this module defines them. */
-export function devToolsToolNames(): readonly string[] {
-  return DEVTOOLS_TOOL_NAMES
 }

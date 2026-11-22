@@ -52,7 +52,7 @@ import { BRIDGE_CONFIG_PATH, BRIDGE_PATH, DEVTOOLS_CAPS_VERSION, parseBridgeConf
 import { BridgeClient, type BridgeState } from './bridge.ts'
 import { createRpc } from './rpc.ts'
 import { discoverInstances, planDiscovery, readBridgeConfig } from './discovery.ts'
-import { listTabFrames } from './frames.ts'
+import { frameDocumentKey, listTabFrames } from './frames.ts'
 import {
   dispatchOpenTab,
   dispatchOpenWindow,
@@ -118,6 +118,8 @@ export interface Settings {
   approvalNotifications: boolean
   /** Restore the current tab and page path's conversation when the panel reopens. */
   autoResumeSession: boolean
+  /** Ask which page the assistant should use when the user switches tabs. */
+  askOnTabSwitch: boolean
 }
 
 const SETTINGS_DEFAULTS: Settings = {
@@ -130,6 +132,7 @@ const SETTINGS_DEFAULTS: Settings = {
   trustedActionOrigins: [],
   approvalNotifications: true,
   autoResumeSession: true,
+  askOnTabSwitch: true,
 }
 
 /**
@@ -350,6 +353,7 @@ let sessionDevToolsGrant = false
 /** Tool calls that are either withdrawable or completing an already-dispatched action. */
 interface ActiveToolCall {
   controller: AbortController
+  tabId?: number
   /** Tool name, so a revocation can target the developer-tools group only. */
   name: string
   unrestrictedAccess: boolean
@@ -442,6 +446,7 @@ async function persistSettings(next: Partial<Settings>): Promise<void> {
   const changesDevTools = typeof next.allowDevTools === 'boolean'
   const revokesDevTools = changesDevTools && (settings.allowDevTools || sessionDevToolsGrant) && !updated.allowDevTools
   settings = updated
+  if (tabAffinity.setAlwaysStay(!updated.askOnTabSwitch)) broadcastTabAffinity()
   if (!updated.unrestrictedBrowserAccess) unrestrictedAccessActive = false
   if (revokesDevTools) sessionDevToolsGrant = false
   syncSelectionWatch()
@@ -507,6 +512,7 @@ function normalizeSettings(candidate: Settings): Settings {
     trustedActionOrigins: trusted,
     approvalNotifications: candidate.approvalNotifications !== false,
     autoResumeSession: candidate.autoResumeSession !== false,
+    askOnTabSwitch: candidate.askOnTabSwitch !== false,
   }
 }
 
@@ -521,6 +527,7 @@ let settingsLoaded = false
 const settingsReady = loadSettings().then((loaded) => {
   settings = loaded
   unrestrictedAccessActive = loaded.unrestrictedBrowserAccess
+  tabAffinity.setAlwaysStay(!loaded.askOnTabSwitch)
   settingsLoaded = true
 })
 
@@ -1147,12 +1154,14 @@ async function authorizeToolCall(
   if (result.status !== 'decision') return result.status
   const { decision } = result
   if (prompt.devTools === true) {
-    // "Trust this session" and the dedicated decision both arm the ephemeral
-    // devtools grant until the panel lease, the worker, or the setting ends it.
-    if (decision === 'trust-session' || decision === 'trust-dev-tools') {
+    // 授权持续到侧栏关闭、worker 终止或用户修改设置。
+    if (decision === 'trust-session') {
+      if (panelPorts.size === 0) return 'cancelled'
       sessionDevToolsGrant = true
+      devTools.resume()
       return 'approved'
     }
+    if (decision === 'allow-once') devTools.resume()
     return decision === 'allow-once' ? 'approved' : 'denied'
   }
   if (decision === 'always-allow-reads' && prompt.kind === 'read') {
@@ -1161,13 +1170,6 @@ async function authorizeToolCall(
   }
   if (decision === 'trust-session' && prompt.kind === 'action' && prompt.canTrust && prompt.origins.length === 1) {
     sessionTrustedActionOrigins.add(prompt.origins[0]!)
-    return 'approved'
-  }
-  // Retain wire compatibility with panels from the previous build. The new UI
-  // manages permanent trust explicitly in Settings instead of offering it in
-  // the action dialog.
-  if (decision === 'trust-origin' && prompt.kind === 'action' && prompt.canTrust && prompt.origins.length === 1) {
-    await persistSettings({ trustedActionOrigins: [...settings.trustedActionOrigins, prompt.origins[0]!] })
     return 'approved'
   }
   return decision === 'allow-once' ? 'approved' : 'denied'
@@ -1559,6 +1561,8 @@ async function dispatchDevToolsTool(call: ToolCall, signal: AbortSignal): Promis
   if (signal.aborted) return devToolsCancelled()
   const target = await resolveToolTab(call.sessionId)
   if ('ok' in target) return target
+  const activeCall = activeToolCalls.get(call.id)
+  if (activeCall !== undefined) activeCall.tabId = target.id
   if (signal.aborted) return devToolsCancelled()
   const frames = await listTabFrames(target.id!, target.url)
   const prompt = devToolsApprovalForCall(call, frames)
@@ -1571,7 +1575,21 @@ async function dispatchDevToolsTool(call: ToolCall, signal: AbortSignal): Promis
     }
   }
   try {
-    return { ok: true, result: await devTools.handle(call.name, call.args, call.sessionId) }
+    const validate = async (executionTarget: { tabId: number }): Promise<void> => {
+      if (signal.aborted) throw new Error('The developer-tools call was cancelled.')
+      const current = await resolveToolTab(call.sessionId)
+      if ('ok' in current || current.id !== target.id || executionTarget.tabId !== target.id) {
+        throw new Error('The controlled tab changed while approval was pending. Request approval again.')
+      }
+      const currentFrames = await listTabFrames(target.id!, current.url)
+      if (signal.aborted || frames.length !== currentFrames.length || frames.some((frame) => {
+        const currentFrame = currentFrames.find((candidate) => candidate.frameId === frame.frameId)
+        return currentFrame === undefined || frameDocumentKey(frame) !== frameDocumentKey(currentFrame)
+      })) {
+        throw new Error('The page changed while approval was pending. Request approval again.')
+      }
+    }
+    return { ok: true, result: await devTools.handle(call.name, call.args, call.sessionId, validate) }
   } catch (error: unknown) {
     return {
       ok: false,
@@ -1588,9 +1606,11 @@ function devToolsCancelled(): ToolAnswer {
 }
 
 /** Abort every in-flight developer-tools call (setting revoked). */
-function cancelDevToolsCalls(): void {
+function cancelDevToolsCalls(tabId?: number): void {
   for (const call of activeToolCalls.values()) {
-    if (isDevToolsTool(call.name) && !call.committed) call.controller.abort()
+    if (isDevToolsTool(call.name) && !call.committed && (tabId === undefined || call.tabId === tabId)) {
+      call.controller.abort()
+    }
   }
 }
 
@@ -2205,6 +2225,8 @@ chrome.runtime.onConnect.addListener((port) => {
     }
     syncSelectionWatch()
     if (panelPorts.size === 0) {
+      sessionDevToolsGrant = false
+      cancelDevToolsCalls()
       bridgeStartRevision += 1
       bridge?.suspendReconnect()
       sessionTrustedActionOrigins.clear()
@@ -2303,6 +2325,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // Matching the exact frame keeps an iframe's navigation from invalidating a
 // quote taken from its parent page, and vice versa.
 chrome.webNavigation.onCommitted.addListener(({ tabId, frameId }) => {
+  cancelDevToolsCalls(tabId)
   broadcastSelections(selections.clearTab(tabId, frameId))
   // A new top-level document drops any modifier or button held by a trusted
   // input sequence; keeping it would leak state into the next page.

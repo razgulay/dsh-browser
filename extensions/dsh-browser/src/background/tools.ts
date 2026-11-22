@@ -27,20 +27,17 @@ import { InputStateStore } from './input-state.ts'
 import {
   InputError,
   dispatchKey,
-  dispatchPointer,
-  dispatchWheel,
   insertTextAtCaret,
   sendPasteShortcut,
   typeAsKeystrokes,
   setInputFiles,
   withFocusEmulation,
-  type PointerAction,
 } from './input-actions.ts'
 import { isModifierName, type ModifierName } from './keys.ts'
-import { toViewportPoint, type Point } from '../shared/frame-geometry.ts'
-import type { InputSetupRequest, InputSetupResult, MeasuredTarget } from '../shared/input-setup.ts'
+import type { InputSetupRequest, InputSetupResult } from '../shared/input-setup.ts'
 import { writeClipboard } from './clipboard-write.ts'
 import type { ClipboardWriteOutcome } from '../shared/clipboard.ts'
+import { resolveDebuggerFrame } from './debugger-frame.ts'
 
 /** A tool call from the bridge. */
 export interface ToolCall {
@@ -119,7 +116,7 @@ export function resetTabSnapshot(tabId: number): void {
   snapshotDocumentsByTab.delete(tabId)
 }
 
-/** Forget held modifiers, buttons, and the pointer for a tab that moved on. */
+/** Forget held modifiers for a tab that moved on. */
 export function resetInputState(tabId: number): void {
   inputStates.reset(tabId)
 }
@@ -387,7 +384,7 @@ function wrapActionDelta(status: string, pageContent: string, frame: TabFrame, m
   return `${prefix}${separator}${wrapUntrustedContent(framedContent, boundaryBudget)}`
 }
 
-/** Per-tab trusted-input state (held modifiers, buttons, pointer). */
+/** Per-tab held modifier state. */
 const inputStates = new InputStateStore()
 
 /** Failure of an internal content-script input setup request. */
@@ -425,15 +422,6 @@ async function sendInputSetup(tabId: number, frame: TabFrame, request: InputSetu
   return response.result
 }
 
-/** A finite viewport point. */
-function finitePoint(value: unknown): Point | undefined {
-  if (typeof value !== 'object' || value === null) return undefined
-  const record = value as { x?: unknown; y?: unknown }
-  if (typeof record.x !== 'number' || typeof record.y !== 'number') return undefined
-  if (!Number.isFinite(record.x) || !Number.isFinite(record.y)) return undefined
-  return { x: record.x, y: record.y }
-}
-
 /** Validate the model-supplied modifier list. */
 function requestedModifiers(args: Record<string, unknown>): ModifierName[] {
   if (args.modifiers === undefined) return []
@@ -448,53 +436,6 @@ function requestedModifiers(args: Record<string, unknown>): ModifierName[] {
     modifiers.push(value)
   }
   return modifiers
-}
-
-/** Resolve a model target into a frame-local point (explicit point or element center). */
-async function resolveFramePoint(tabId: number, frame: TabFrame, args: Record<string, unknown>): Promise<{ point: Point; label: string }> {
-  const explicit = finitePoint(args.point)
-  if (explicit !== undefined) return { point: explicit, label: `point ${Math.round(explicit.x)},${Math.round(explicit.y)}` }
-  const setup = await sendInputSetup(tabId, frame, {
-    op: 'measure',
-    ...(args.index === undefined ? {} : { index: args.index as number }),
-    ...(typeof args.selector === 'string' ? { selector: args.selector } : {}),
-  })
-  if (setup.op !== 'measure') {
-    throw new InputSetupError('action-failed', 'The page returned an unexpected measurement result.')
-  }
-  const measure: MeasuredTarget = setup.measure
-  const point = { x: measure.rect.x + measure.rect.width / 2, y: measure.rect.y + measure.rect.height / 2 }
-  const identity = measure.selector === '' ? 'element' : measure.selector
-  return { point, label: `${identity} center` }
-}
-
-/** The frame-owner chain used to translate frame coordinates into the tab viewport. */
-async function frameEdges(tabId: number, frame: TabFrame): Promise<import('../shared/frame-geometry.ts').FrameEdge[]> {
-  const setup = await sendInputSetup(tabId, frame, { op: 'offset' })
-  if (setup.op !== 'offset') {
-    throw new InputSetupError('action-failed', 'The page returned an unexpected frame geometry result.')
-  }
-  return setup.edges
-}
-
-/** Translate one explicit point from frame coordinates into the tab viewport. */
-async function viewportPointFor(tabId: number, frame: TabFrame, point: Point): Promise<Point> {
-  return toViewportPoint(await frameEdges(tabId, frame), point)
-}
-
-/** Rough plain text of an HTML fragment, used as the clipboard text flavor. */
-function plainTextFromHtml(html: string): string {
-  return html
-    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim()
 }
 
 /** Report what the clipboard actually holds, including derived plain text. */
@@ -514,7 +455,7 @@ function describeTarget(args: Record<string, unknown>): string {
 }
 
 /**
- * After trusted input, wait for the frame to settle and attach the page delta.
+ * After trusted input, wait for the frame to settle and attach an authorized page delta.
  * The `browser_wait` action already owns both behaviors for content-script
  * actions; reusing it keeps the result shape identical for real input.
  */
@@ -523,16 +464,17 @@ async function settleAfterInput(
   frame: TabFrame,
   status: string,
   budget: ContentBudget,
+  includePageDelta: boolean,
 ): Promise<ToolAnswer> {
   try {
     const response = await chrome.tabs.sendMessage(
       tabId,
-      { type: 'DSH_ACTION', action: 'browser_wait', args: {}, budget, includePageDelta: true },
+      { type: 'DSH_ACTION', action: 'browser_wait', args: {}, budget, includePageDelta },
       frame.documentId === undefined ? { frameId: frame.frameId } : { documentId: frame.documentId },
     )
     if (isToolAnswer(response)) {
       const pageContent = answerPageContent(response)
-      if (pageContent !== undefined) {
+      if (includePageDelta && pageContent !== undefined) {
         return { ok: true, result: { text: wrapActionDelta(`${status} (trusted)`, pageContent, frame, budget.maxChars) } }
       }
     }
@@ -540,15 +482,6 @@ async function settleAfterInput(
     // The page may be navigating; the trusted action itself already succeeded.
   }
   return { ok: true, result: { text: `${status} (trusted)` } }
-}
-
-/** Normalize a pointer action argument. */
-function requestedPointerAction(value: unknown): PointerAction {
-  if (value === undefined) return 'click'
-  if (value === 'click' || value === 'dblclick' || value === 'move' || value === 'down' || value === 'up' || value === 'drag') {
-    return value
-  }
-  throw new InputError('bad-args', 'action must be click, dblclick, move, down, up, or drag.')
 }
 
 /**
@@ -560,14 +493,6 @@ function requestedPointerAction(value: unknown): PointerAction {
  */
 function inputRoute(call: ToolCall): 'content' | 'trusted' | 'required' | 'host' {
   switch (call.name) {
-    case 'browser_click': {
-      const action = call.args.action
-      // A double click has a synthetic equivalent; movement, press/release,
-      // and drag only exist as real pointer events.
-      const gesture = action === 'move' || action === 'down' || action === 'up' || action === 'drag'
-      if (gesture || call.args.point !== undefined || call.args.trusted === true) return 'required'
-      return 'content'
-    }
     case 'browser_press':
       if (call.args.trusted === true) return 'required'
       if (call.args.trusted === false) return 'content'
@@ -575,10 +500,9 @@ function inputRoute(call: ToolCall): 'content' | 'trusted' | 'required' | 'host'
       return 'content'
     case 'browser_type':
       if (call.args.trusted === true) return 'required'
+      if (call.args.trusted === false) return 'content'
       if (call.args.mode === 'insert' || call.args.mode === 'keystrokes') return 'trusted'
       return 'content'
-    case 'browser_scroll':
-      return call.args.point === undefined ? 'content' : 'required'
     case 'browser_clipboard':
       if (call.args.action === 'write') return 'host'
       return call.args.method === 'system' ? 'required' : 'content'
@@ -612,12 +536,7 @@ function usableInput(runtime: InputRuntime | undefined): runtime is InputRuntime
 
 /** A token that only marks one file input for one upload call. */
 function uploadToken(): string {
-  try {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
-  } catch {
-    // Fall through to the time-based token.
-  }
-  return `u${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
+  return crypto.randomUUID()
 }
 
 async function snapshotAllFrames(
@@ -772,46 +691,6 @@ function requestedPaths(value: unknown): string[] {
   return paths
 }
 
-/** Trusted pointer: real mouse events at a frame-local point. */
-async function trustedClick(
-  tabId: number,
-  frame: TabFrame,
-  call: ToolCall,
-  budget: ContentBudget,
-  runtime: InputRuntime | undefined,
-): Promise<ToolAnswer | undefined> {
-  const args = call.args
-  const action = requestedPointerAction(args.action)
-  if (args.trusted === false && (args.point !== undefined || (action !== 'click' && action !== 'dblclick'))) {
-    throw new InputError('bad-args', 'Coordinates and pointer gestures cannot be delivered without trusted input; drop trusted:false.')
-  }
-  const input = requireInput(runtime)
-  const local = await resolveFramePoint(tabId, frame, args)
-  const point = await viewportPointFor(tabId, frame, local.point)
-  const modifiers = requestedModifiers(args)
-  const button = args.button === 'right' ? 'right' : args.button === 'middle' ? 'middle' : 'left'
-  const clicks = typeof args.clicks === 'number' ? args.clicks : undefined
-  const steps = typeof args.steps === 'number' ? args.steps : undefined
-  let to: Point | undefined
-  if (action === 'drag') {
-    const destination = finitePoint(args.to)
-    if (destination === undefined) throw new InputError('bad-args', 'drag needs a destination point (to).')
-    to = await viewportPointFor(tabId, frame, destination)
-  }
-  await input.run(tabId, async (client) => {
-    await dispatchPointer(client, inputStates.get(tabId), {
-      action,
-      point,
-      button,
-      modifiers,
-      ...(clicks === undefined ? {} : { clicks }),
-      ...(to === undefined ? {} : { to }),
-      ...(steps === undefined ? {} : { steps }),
-    })
-  })
-  return settleAfterInput(tabId, frame, `${action} at ${local.label}`, budget)
-}
-
 /** Trusted keyboard: real key events, including held modifiers. */
 async function trustedPress(
   tabId: number,
@@ -819,6 +698,7 @@ async function trustedPress(
   call: ToolCall,
   budget: ContentBudget,
   runtime: InputRuntime | undefined,
+  includePageDelta: boolean,
 ): Promise<ToolAnswer | undefined> {
   const args = call.args
   const key = typeof args.key === 'string' && args.key !== '' ? args.key : ''
@@ -840,7 +720,7 @@ async function trustedPress(
     })
   })
   const chord = modifiers.length === 0 ? key : `${modifiers.join('+')}+${key}`
-  return settleAfterInput(tabId, frame, `sent key "${chord}"${repeat > 1 ? ` x${repeat}` : ''}`, budget)
+  return settleAfterInput(tabId, frame, `sent key "${chord}"${repeat > 1 ? ` x${repeat}` : ''}`, budget, includePageDelta)
 }
 
 /** Trusted text: a caret insertion or per-character key events. */
@@ -850,13 +730,15 @@ async function trustedType(
   call: ToolCall,
   budget: ContentBudget,
   runtime: InputRuntime | undefined,
+  includePageDelta: boolean,
 ): Promise<ToolAnswer | undefined> {
   const args = call.args
   const text = typeof args.text === 'string' ? args.text : ''
   if (text === '') throw new InputError('bad-args', 'text must not be empty.')
   const mode = args.mode === 'keystrokes' ? 'keystrokes' : 'insert'
   const input = requireInput(runtime)
-  await prepareInputTarget(tabId, frame, args, args.replace === true ? 'contents' : 'end')
+  const selection = args.replace === true ? 'contents' : args.mode === 'insert' || args.mode === 'keystrokes' ? 'none' : 'end'
+  await prepareInputTarget(tabId, frame, args, selection)
   await input.run(tabId, async (client) => {
     await withFocusEmulation(client, async () => {
       if (mode === 'keystrokes') await typeAsKeystrokes(client, inputStates.get(tabId), text)
@@ -868,76 +750,7 @@ async function trustedType(
     frame,
     `entered ${text.length} characters into ${describeTarget(args)} (${mode})`,
     budget,
-  )
-}
-
-/**
- * Wheel input is compositor-driven: a background or frozen tab can leave the
- * CDP command unanswered until it times out. Check visibility up front and
- * return an instruction the caller can act on instead of a 10-second timeout.
- */
-async function requireVisiblePageForWheel(tabId: number): Promise<void> {
-  let tab: chrome.tabs.Tab
-  try {
-    tab = await chrome.tabs.get(tabId)
-  } catch {
-    return
-  }
-  if (tab.active === false) {
-    throw new InputError(
-      'action-failed',
-      'A wheel gesture needs its page to be the active tab; a background tab can freeze and never answer the event. '
-      + 'Call browser_follow_tab { activate: true } first.',
-    )
-  }
-  const windowsApi = (globalThis as {
-    chrome?: { windows?: { get?: (id: number) => Promise<{ focused?: boolean }> } }
-  }).chrome?.windows
-  if (typeof windowsApi?.get === 'function') {
-    try {
-      const win = await windowsApi.get(tab.windowId)
-      if (win.focused === false) {
-        throw new InputError(
-          'action-failed',
-          'A wheel gesture needs the browser window in the foreground; a hidden window can freeze the event. '
-          + 'Call browser_follow_tab { activate: true } first.',
-        )
-      }
-    } catch (error: unknown) {
-      if (error instanceof InputError) throw error
-    }
-  }
-}
-
-/** Trusted wheel: canvas zoom/pan and custom scroll gestures. */
-async function trustedWheel(
-  tabId: number,
-  frame: TabFrame,
-  call: ToolCall,
-  budget: ContentBudget,
-  runtime: InputRuntime | undefined,
-): Promise<ToolAnswer | undefined> {
-  const args = call.args
-  const local = finitePoint(args.point)
-  if (local === undefined) throw new InputError('bad-args', 'point is required for a wheel gesture.')
-  const input = requireInput(runtime)
-  await requireVisiblePageForWheel(tabId)
-  const direction = args.direction === 'up' || args.direction === 'down' ? args.direction : undefined
-  const amount = typeof args.amount === 'number' ? args.amount : 400
-  const deltaX = typeof args.deltaX === 'number' ? args.deltaX : 0
-  const deltaY = typeof args.deltaY === 'number'
-    ? args.deltaY
-    : direction === 'up' ? -amount : direction === 'down' ? amount : 0
-  const modifiers = requestedModifiers(args)
-  const point = await viewportPointFor(tabId, frame, local)
-  await input.run(tabId, async (client) => {
-    await dispatchWheel(client, inputStates.get(tabId), { point, deltaX, deltaY, modifiers })
-  })
-  return settleAfterInput(
-    tabId,
-    frame,
-    `wheel delta ${Math.round(deltaX)},${Math.round(deltaY)} at ${Math.round(local.x)},${Math.round(local.y)}`,
-    budget,
+    includePageDelta,
   )
 }
 
@@ -948,20 +761,19 @@ async function trustedClipboard(
   call: ToolCall,
   budget: ContentBudget,
   runtime: InputRuntime | undefined,
+  includePageDelta: boolean,
 ): Promise<ToolAnswer | undefined> {
   const args = call.args
   const text = typeof args.text === 'string' ? args.text : ''
   const html = typeof args.html === 'string' && args.html !== '' ? args.html : undefined
-  // When only HTML is supplied, the plain-text flavor is the HTML's text.
-  const effectiveText = text !== '' ? text : html === undefined ? '' : plainTextFromHtml(html)
   if (args.action === 'write') {
     if (text === '' && html === undefined) throw new InputError('bad-args', 'text or html is required for a clipboard write.')
-    const outcome = await writeClipboard({ text: effectiveText, ...(html === undefined ? {} : { html }) })
+    const outcome = await writeClipboard({ text, ...(html === undefined ? {} : { html }) })
     return { ok: true, result: { text: describeClipboardWrite(outcome) } }
   }
   const input = requireInput(runtime)
   if (text !== '' || html !== undefined) {
-    await writeClipboard({ text: effectiveText, ...(html === undefined ? {} : { html }) })
+    await writeClipboard({ text, ...(html === undefined ? {} : { html }) })
   }
   await prepareInputTarget(tabId, frame, args, 'none')
   await input.run(tabId, async (client) => {
@@ -969,7 +781,7 @@ async function trustedClipboard(
       await sendPasteShortcut(client, inputStates.get(tabId), navigator.userAgent)
     })
   })
-  return settleAfterInput(tabId, frame, `pasted the system clipboard into ${describeTarget(args)}`, budget)
+  return settleAfterInput(tabId, frame, `pasted the system clipboard into ${describeTarget(args)}`, budget, includePageDelta)
 }
 
 /** File attachment: mark the input, let the browser process read the paths. */
@@ -996,7 +808,14 @@ async function trustedUpload(
     throw new InputSetupError('action-failed', 'The page returned an unexpected upload result.')
   }
   try {
-    await input.run(tabId, async (client) => { await setInputFiles(client, mark.selector, paths) })
+    await input.run(tabId, async (client) => {
+      if (frame.frameId === 0) {
+        await setInputFiles(client, mark.selector, paths)
+        return
+      }
+      const target = await resolveDebuggerFrame(client, tabId, frame)
+      await setInputFiles(target.client, mark.selector, paths, target.uniqueId)
+    })
   } finally {
     void sendInputSetup(tabId, frame, { op: 'upload-clear', token }).catch(() => undefined)
   }
@@ -1018,6 +837,7 @@ async function dispatchTrustedInput(
   call: ToolCall,
   budget: ContentBudget,
   runtime: InputRuntime | undefined,
+  includePageDelta: boolean,
 ): Promise<ToolAnswer | undefined> {
   const route = inputRoute(call)
   if (route === 'content') return undefined
@@ -1025,17 +845,13 @@ async function dispatchTrustedInput(
   try {
     switch (call.name) {
       case 'browser_clipboard':
-        return await trustedClipboard(tabId, frame, call, budget, runtime)
+        return await trustedClipboard(tabId, frame, call, budget, runtime, includePageDelta)
       case 'browser_upload':
         return await trustedUpload(tabId, frame, call, runtime)
-      case 'browser_click':
-        return await trustedClick(tabId, frame, call, budget, runtime)
       case 'browser_press':
-        return await trustedPress(tabId, frame, call, budget, runtime)
+        return await trustedPress(tabId, frame, call, budget, runtime, includePageDelta)
       case 'browser_type':
-        return await trustedType(tabId, frame, call, budget, runtime)
-      case 'browser_scroll':
-        return await trustedWheel(tabId, frame, call, budget, runtime)
+        return await trustedType(tabId, frame, call, budget, runtime, includePageDelta)
       default:
         return undefined
     }
@@ -1070,11 +886,12 @@ async function dispatchOnce(
   }
   const route = inputRoute(call)
   const syntheticFallback = route === 'trusted'
+  const hasSnapshotBaseline = snapshotDocumentsByTab.get(tabId)?.get(frameId) === frameDocumentKey(frame)
   if (route !== 'content') {
     // Commit before dispatching: a trusted gesture cannot be withdrawn once the
     // browser has delivered it, so the deadline must not abort it mid-flight.
     if (STATE_CHANGING_PAGE_TOOLS.has(call.name)) commitAction?.()
-    const trusted = await dispatchTrustedInput(tabId, frame, call, budget, inputRuntime)
+    const trusted = await dispatchTrustedInput(tabId, frame, call, budget, inputRuntime, includeActionDelta && hasSnapshotBaseline)
     if (trusted !== undefined) return trusted
     if (!syntheticFallback) {
       return inputUnavailable('This browser has no trusted input channel for this action.')
@@ -1084,7 +901,6 @@ async function dispatchOnce(
   // approval cannot cross the final state-changing dispatch boundary.
   if (isCancelled(call, signal)) return cancelled()
   if (targetStillAllowed?.() === false) return targetChanged()
-  const hasSnapshotBaseline = snapshotDocumentsByTab.get(tabId)?.get(frameId) === frameDocumentKey(frame)
   const requestPageDelta = includeActionDelta && hasSnapshotBaseline && ACTION_DELTA_TOOLS.has(call.name)
   const navigationWait = includeActionDelta && isNavigationCandidateTool(call.name)
     ? waitForNextDocumentReady(tabId, frameId, frame.documentId, signal)
@@ -1603,7 +1419,7 @@ const INDEX_TARGETED_TOOLS = new Set([
 ])
 
 function validateElementTarget(call: ToolCall, tabId: number, frames: TabFrame[]): ToolAnswer | undefined {
-  // A selector, a coordinate, or "the focused element" is self-contained; only
+  // A selector or "the focused element" is self-contained; only
   // a snapshot index needs a snapshot of the same document to resolve.
   if (!INDEX_TARGETED_TOOLS.has(call.name)) return undefined
   if (call.args.index === undefined) return undefined

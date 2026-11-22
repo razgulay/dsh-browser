@@ -1,36 +1,20 @@
 /**
  * Content-script half of trusted input.
  *
- * The background dispatches real keyboard and pointer events, but only the
- * frame can focus a target, select its contents, measure it, or report the
- * iframe chain that maps its coordinates into the tab viewport. These handlers
+ * The background dispatches keyboard events, but only the
+ * frame can focus a target or select its contents. These handlers
  * are internal plumbing: they never reach the model and return structured data
  * rather than text.
  *
  * @module
  */
 
-import type { FrameEdge } from '../shared/frame-geometry.ts'
-import type { InputSetupRequest, InputSetupResult, MeasuredTarget } from '../shared/input-setup.ts'
+import type { InputSetupRequest, InputSetupResult } from '../shared/input-setup.ts'
 import { ActionError, resolveActionTarget } from './actions.ts'
-import { isEditableElement, isFocusableElement, uniqueSelectorFor } from './find.ts'
 import type { ElementIds } from './ids.ts'
 
 /** Attribute used to hand one file input to the debugger without ambiguity. */
 const UPLOAD_ATTRIBUTE = 'data-dsh-upload'
-
-/** Measure one element inside the current frame. */
-function measure(args: { index?: number; selector?: string }, ids: ElementIds): MeasuredTarget {
-  const element = resolveActionTarget(args, ids)
-  const rect = element.getBoundingClientRect()
-  return {
-    rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
-    selector: uniqueSelectorFor(element),
-    editable: isEditableElement(element),
-    focusable: isFocusableElement(element),
-    visible: rect.width > 0 && rect.height > 0,
-  }
-}
 
 /** Focus one element and optionally select everything it contains. */
 function prepare(
@@ -78,39 +62,6 @@ function prepare(
   }
 }
 
-/**
- * Report the placement of every frame between this document and the tab's
- * top-level viewport, innermost first.
- *
- * A cross-origin ancestor hides `window.frameElement`; the coordinates then
- * cannot be translated and the caller must not guess.
- */
-function offsetChain(): FrameEdge[] {
-  const edges: FrameEdge[] = []
-  let current: Window = window
-  try {
-    while (current !== current.parent) {
-      const owner = current.frameElement
-      if (owner === null) break
-      const rect = owner.getBoundingClientRect()
-      edges.push({
-        left: rect.left,
-        top: rect.top,
-        clientLeft: owner.clientLeft,
-        clientTop: owner.clientTop,
-      })
-      current = current.parent
-    }
-  } catch {
-    throw new ActionError(
-      'input-unavailable',
-      'A cross-origin frame between this document and the tab hides its placement, so coordinates cannot be translated. '
-      + 'Target the element by index or selector instead of by point.',
-    )
-  }
-  return edges
-}
-
 /** Tag a file input so the debugger can address it by a unique selector. */
 function markUpload(args: { token: string; index?: number; selector?: string }, ids: ElementIds): string {
   const element = resolveActionTarget(args, ids)
@@ -141,12 +92,8 @@ function clearUpload(token: string): boolean {
  */
 export function handleInputSetup(request: InputSetupRequest, ids: ElementIds): InputSetupResult {
   switch (request.op) {
-    case 'measure':
-      return { op: 'measure', measure: measure(request, ids) }
     case 'prepare':
       return { op: 'prepare', ...prepare(request, ids) }
-    case 'offset':
-      return { op: 'offset', edges: offsetChain() }
     case 'upload-mark':
       return { op: 'upload-mark', selector: markUpload(request, ids) }
     case 'upload-clear':

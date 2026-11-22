@@ -2,36 +2,31 @@
 
 **English** | [中文](README.zh.md)
 
-> [!NOTE]
-> This is the **graydovee fork** of [Lum1104/dsh-browser](https://github.com/Lum1104/dsh-browser), keeping the upstream code and its MIT licence. It adds what only this fork ships: permission, model, and `/`-command controls in the side panel, an opt-in developer-tools group, viewport screenshots, and image attachments in the panel.
-> This fork also tracks the current DSH plugin interfaces: the bridge declares `engines.dsh: ^0.2.1-rc.2` and is verified against dsh 0.2.1-rc.3 (0.2.1-rc.2 exposes the same plugin interfaces, so it stays supported).
-> Fork changes are recorded in [CHANGELOG.md](CHANGELOG.md) with its [Chinese edition](CHANGELOG.zh-CN.md). Upstream publishes no changelog, so compare the upstream side against [its commit history](https://github.com/Lum1104/dsh-browser/commits/main) or [its tags](https://github.com/Lum1104/dsh-browser/tags).
-
 <img width="1701" height="897" alt="dsh Browser Control" src="https://github.com/user-attachments/assets/3b1f3a25-f962-4e02-a9ef-d23e0d01fc8e" />
 
 Connect [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) to the Chrome or Firefox tabs you are already using. The model can read page content, operate controls, navigate, and manage tabs while preserving your login state, session, and cookies. A side panel or sidebar provides the conversation UI.
 
 `dsh` is DeepSeek AI's open-source, plugin-based agent harness. This repository provides a companion browser bridge plugin and Chrome/Firefox MV3 extension as one standalone pnpm workspace.
 
-Browser operation remains text-only: pages become structured text with a numbered inventory of interactive elements, and the model addresses those elements by number. dsh 0.2 multimodal chat is separate from that page channel—the side panel accepts PNG, JPEG, WebP, and GIF attachments when the host advertises image support, while browser tools still never capture screenshots.
+Pages become structured text with a numbered inventory of interactive elements. Tools address elements by number or selector; `browser_screenshot` captures the controlled tab's viewport after approval. The side panel also accepts PNG, JPEG, WebP, and GIF attachments when the host advertises image support.
 
 > [!IMPORTANT]
-> **Runtime compatibility:** this release is adapted to and verified against **dsh 0.2.1-rc.3**. The workspace pins that release; the bridge plugin declares `engines.dsh: ^0.2.1-rc.2`, which also admits 0.2.1-rc.2 hosts, and older DSH releases are not supported.
+> The workspace is pinned to DSH 0.2.2-rc.5.
 
 ## Quick install
 
-The standard `dsh plugin` command alone cannot install this project. The integration contains both a dsh bridge plugin and a browser extension. The one-line installer currently sets up the Chrome build.
+The installer installs the bridge plugin and Chrome extension.
 
 macOS and Linux:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/graydovee/dsh-browser/refs/heads/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/install.sh | bash
 ```
 
 Windows, in PowerShell:
 
 ```powershell
-$s="$env:TEMP\dsh-install.ps1"; irm https://raw.githubusercontent.com/graydovee/dsh-browser/refs/heads/main/scripts/install.ps1 -OutFile $s; powershell -NoProfile -ExecutionPolicy Bypass -File $s
+$s="$env:TEMP\dsh-install.ps1"; irm https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/install.ps1 -OutFile $s; powershell -NoProfile -ExecutionPolicy Bypass -File $s
 ```
 
 When the installer opens `chrome://extensions`, follow its instructions to load or reload **dsh Browser Assistant**. If dsh is already running, restart it after installation. See [Detailed installation and usage](#detailed-installation-and-usage) for prerequisites, startup commands, updates, and developer installation.
@@ -54,14 +49,14 @@ The paired Playwright / extension duration ratio was **1.24** (95% CI **1.16–1
 
 | Capability | Tool | Notes |
 |---|---|---|
-| Read page | `browser_snapshot` | Structured text snapshot: title, URL, main text, numbered controls, and masked form fields; `delta: true` returns only changes, `frame` reads one iframe, and `query` locates any element by text/selector/role with its selector and rect |
-| Pointer | `browser_click` | Click, double-click, hover, press, release, or drag by index or selector; canvas targets without an identity accept frame-local `point` coordinates |
+| Read page | `browser_snapshot` | Structured text snapshot: title, URL, main text, numbered controls, and masked form fields; `delta: true` returns only changes, `frame` reads one iframe, and `query` locates any element by text/selector/role and returns its selector |
+| Click | `browser_click` | Click or double-click by index or selector; supports mouse buttons and modifiers |
 | Text | `browser_type` | React/Vue-compatible input; `replace` clears the field first, and `mode` selects caret insertion or per-character key events |
 | Press keys | `browser_press` | Single keys or chords (`modifiers`); `action: down/up` holds a key across calls and `repeat` repeats it |
-| Scroll | `browser_scroll` | Viewport/container scrolling; with `point` it sends a real wheel gesture at those coordinates (canvas zoom/pan) |
+| Scroll | `browser_scroll` | Scroll the page or selected iframe up, down, to the top, or to the bottom |
 | Clipboard | `browser_clipboard` | `write` puts text/HTML on the system clipboard; `paste` delivers it as a paste event or a real platform shortcut |
 | Files | `browser_upload` | Attach local files to an `input[type=file]` (Chrome) |
-| Navigate | `browser_navigate` / `browser_open_tab` / `browser_open_window` / `browser_back` / `browser_forward` / `browser_reload` | Navigation inside the controlled tab, open a URL in a new tab (`active:false` keeps the current tab in front), or open a new browser window (`focused:false` opens without stealing focus) |
+| Navigate | `browser_navigate` / `browser_open_tab` / `browser_back` / `browser_forward` / `browser_reload` | Navigation inside the controlled tab, or open a URL in a new tab and follow it (`active:false` keeps the current tab in front) |
 | List tabs | `browser_list_tabs` | List accessible tabs with stable IDs, titles, URLs, window/index metadata, and active/controlled state |
 | Follow tab | `browser_follow_tab` | Bind later browser tools to a tab returned by `browser_list_tabs`; it stays in the background unless `activate: true` |
 | Close tab | `browser_close_tab` | Close a tab returned by `browser_list_tabs` |
@@ -69,62 +64,45 @@ The paired Playwright / extension duration ratio was **1.24** (95% CI **1.16–1
 | Wait for stability | `browser_wait` | Page-load and render-settle detection |
 | Send images | `session.prompt` / `session.attachment` | Host-capability-gated image drafts, image-only prompts, and durable history previews |
 | Quote a selection | side panel composer | Text you highlight in the page appears in the composer and is sent with your next message as fenced, attributed page content |
+| Continue generating | side panel | Continue an interrupted response when the host offers it |
 
-The input layer is a set of general primitives, not per-app handling: keyboard, pointer, text, clipboard, and files all address a target by element identity or coordinates, so any rich editor, canvas, code editor, or drag surface uses the same parameters. Input runs in the background by default — no tab activation, no window focus, no system pointer movement. When real events matter (`isTrusted`, browser default actions) the Chrome build delivers them through the debugger; Firefox degrades to synthetic events and marks the result `(synthetic)`. Wheel gestures and screenshots are the exceptions: a wheel needs the page to be the active tab in a focused window (Chrome freezes background pages, so the tool fails fast with a `follow_tab {activate:true}` hint), and a screenshot needs the same focus or it may return an older frame.
-
-## Repository layout
-
-```
-packages/browser/bridge-browser/
-  cordis.patch.yml
-extensions/dsh-browser/
-scripts/install.sh
-scripts/install.ps1
-```
-
-Release-by-release code changes are recorded in [CHANGELOG.md](CHANGELOG.md) ([中文](CHANGELOG.zh-CN.md)).
-
-## Why this design
-
-- **Your real browser, not a headless copy**: the model works in the page you already have open, retaining logins, sessions, and cookies.
-- **A text-first page interface**: numbered controls, stable IDs across snapshots, delta updates, and masked sensitive values make pages operable without screenshots; user-attached chat images use dsh's separate multimodal message path.
-- **Pointing instead of describing**: highlight the passage you mean and the side panel quotes it, so "explain this" needs no page tour. The quote is captured only while a panel is open, and nothing is sent until you send the message.
-- **A narrow privacy boundary**: passwords and payment-card values are always rendered as `••••` and never leave the page.
-- **A guarded bridge**: authenticated handshakes protect remote connections, privileged gateway methods reject non-loopback callers, and the extension binds tools to one user-controlled tab.
+Clicks, text entry, and scrolling run in the selected document, including cross-origin iframes. Chrome uses its debugger for native keyboard events, caret insertion, system paste, and file uploads. Screenshots require an active tab in a focused window; `browser_follow_tab { activate: true }` brings the controlled page to the front.
 
 ## Detailed installation and usage
 
-Requirements: Node.js `^22.19` or `>=24`, Corepack/pnpm, and Chrome 116+ or Firefox 140+. Windows additionally needs Windows PowerShell 5.1, which ships with Windows, or PowerShell 7+.
+Requirements: Node.js `>=24.9.0`, Corepack/pnpm, and Chrome 125+ or Firefox 140+. Windows additionally needs Windows PowerShell 5.1, which ships with Windows, or PowerShell 7+.
 
 ### Install or update
 
-For a managed installation, run:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/graydovee/dsh-browser/refs/heads/main/scripts/install.sh | bash
-```
-
-or, on Windows:
-
-```powershell
-$s="$env:TEMP\dsh-install.ps1"; irm https://raw.githubusercontent.com/graydovee/dsh-browser/refs/heads/main/scripts/install.ps1 -OutFile $s; powershell -NoProfile -ExecutionPolicy Bypass -File $s
-```
-
-The installer downloads `main`, builds and registers the bridge plugin, builds the Chrome extension into `~/.dsh/browser-extension`, and opens `chrome://extensions`. On the first install, load that directory as an unpacked extension; on updates, click **Reload**. Restart dsh if it is already running. Note for updates from an older build: the extension now pins a stable manifest `key`, so its id (and the per-id stored settings) change once — re-enter the bridge address and token in the panel if you had configured a remote bridge.
-
-`scripts/install.sh` covers macOS and Linux, and `scripts/install.ps1` covers Windows; both write the same managed workspace and the same install metadata. The installer copies the extension path to the clipboard when a clipboard tool is available (`pbcopy`, `wl-copy`, `xclip`, `xsel`, or PowerShell's `Set-Clipboard`), and prints the path either way. When no Chrome or Chromium install is found, it prints the command that installs one; set `DSH_INSTALL_BROWSER=1` to let the installer attempt that install itself.
-
-The Windows command downloads `install.ps1` and runs it rather than piping it into `Invoke-Expression`: the script is UTF-8 with a byte order mark so Windows PowerShell renders its Chinese output, and `Invoke-Expression` rejects a leading mark. Local checkout paths may contain spaces; the installer registers the bridge through a profile-local directory junction so the package spec never contains the absolute Windows path.
+Run the [quick install command](#quick-install) to install or update. The installer opens `chrome://extensions`; load `~/.dsh/browser-extension` as an unpacked extension the first time, or click **Reload** after an update. Restart dsh if it is already running.
 
 To install the current branch from a source checkout instead:
 
 ```sh
-git clone https://github.com/graydovee/dsh-browser.git
+git clone https://github.com/Lum1104/dsh-browser.git
 cd dsh-browser
 ./scripts/install.sh
 ```
 
 On Windows, run `.\scripts\install.ps1` from the checkout instead. After pulling or switching revisions, rerun the installer and reload the extension.
+
+### Uninstall
+
+Open **Settings → Uninstall dsh-browser** in the extension, copy the command, and run it in Terminal.
+
+You can also run it directly. On macOS or Linux:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/uninstall.sh | bash
+```
+
+On Windows:
+
+```powershell
+& { $ErrorActionPreference = 'Stop'; $d=New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath()) ('dsh-browser-uninstall.'+[Guid]::NewGuid().ToString('N'))); try { $s=Join-Path $d.FullName 'uninstall.ps1'; Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/Lum1104/dsh-browser/refs/heads/main/scripts/uninstall.ps1 -OutFile $s; powershell -NoProfile -ExecutionPolicy Bypass -File $s } finally { Remove-Item -LiteralPath $d.FullName -Recurse -Force } }
+```
+
+From a checkout, run `bash scripts/uninstall.sh` or `.\scripts\uninstall.ps1`.
 
 ### Firefox source build
 
@@ -145,10 +123,10 @@ Start the managed installation with:
 cd ~/.dsh/dsh-browser && pnpm start
 ```
 
-From a source checkout, run `pnpm start` in the repository root. This release is adapted to and tested against the following DSH runtime:
+From a source checkout, run `pnpm start` in the repository root. The exact supported public runtime is:
 
 ```sh
-npx @deepseek-ai/dsh@0.2.1-rc.3 web
+npx @deepseek-ai/dsh@0.2.2-rc.5 web
 ```
 
 Local Chrome use requires no configuration; Firefox requires the local bridge token described above. Open a page, click the DeepSeek whale icon, and wait for **Connected**. Existing HTTP(S) tabs are instrumented on the first action. On browser-protected pages and extension stores, the model can read tab metadata and use browser-level HTTP(S) navigation, back, forward, and reload, but it cannot inspect or operate the protected page DOM.
@@ -157,14 +135,16 @@ Local Chrome use requires no configuration; Firefox requires the local bridge to
 
 **Side panel stays "Not connected"**
 
-- Make sure dsh web is running locally (default `http://127.0.0.1:3080`).
-- Verify the bridge is loaded: open `http://127.0.0.1:3080/ext/bridge-config`. It should return JSON such as `{"wsUrl":"ws://127.0.0.1:3080/ext/bridge"}`. If it returns a web page instead of JSON, the running dsh predates the bridge registration — restart dsh and refresh the page; the extension reconnects on its own.
-- Discovery runs once when the panel opens. A filled-in address is tried first; if a **loopback** address does not answer, the panel makes one automatic pass (last working URL → `dsh web` defaults → the plugin's fixed beacon ports 43189–43198). When that pass finds nothing the status reads **No service found** and nothing retries until you reopen the panel or press **Detect**.
-- DSH Desktop assigns a random local Web port on every launch, which is why the bridge plugin also listens on a fixed loopback beacon port. If the panel cannot find it, open **Settings → Detect** to list every local instance and click the one to use; the address can still be typed by hand. Remote `--host` deployments need the address and token filled in manually; Firefox always requires the token.
+- Make sure DSH is running. After installing or updating, restart DSH and reopen the side panel.
+- Open **Settings → Detect** and select your DSH instance.
+- In Firefox, enter the token from `~/.dsh/ext-bridge-token` in Settings.
+- For a remote DSH instance, enter its server address and bridge token in Settings.
 
 ## Development
 
 The bridge plugin and Chrome/Firefox extension are both members of this repository's workspace. Run all commands from the repository root. For the first development installation, run `pnpm install`.
+
+Package documentation: [browser bridge](packages/browser/bridge-browser/README.md) and [browser extension](extensions/dsh-browser/README.md).
 
 ```sh
 pnpm run build
@@ -185,22 +165,18 @@ pnpm --filter dsh-browser-extension run test
 Notes:
 
 - The bridge plugin must have a built `lib/` before startup because the loader consumes it; both `scripts/install.sh` and the root `pnpm run build` build the plugin before the extension.
-- The bridge build copies its browser client with Node.js `copyFileSync`, so the same package script works without a Unix `cp` executable.
 - The dependencies of `@deepseek-ai/dsh` and the bridge plugin are pinned to the same tested public release line. An upgrade must update the manifests and lockfile together and rerun the root checks.
 
 `check:runtime` checks the resolved DSH dependencies and lockfile; `test:smoke` starts the real web host in a temporary DSH home and verifies the bridge and session reads after a restart, without model credentials. CI runs these checks after a clean installation.
 
-If you encounter `cache.hydratePrepared is not a function`, update the repository, rerun `pnpm install --frozen-lockfile` and `pnpm run build`, then restart `pnpm start`. Session data and the global package cache can be kept.
+After building, run `pnpm test:browser` with a Playwright Chromium installation, or set `CHROMIUM_PATH` to a Chromium executable that supports loading unpacked extensions. This starts real DSH and Chromium instances to verify sharing controls, developer-tools consent, input, iframe uploads and targeting, and CSS edits. Site isolation is enabled and verified for cross-site frames; element clicks, input, and scrolling cover same-origin, cross-origin, and nested frames. It needs no model credentials and saves results under `.artifacts/browser-smoke/`.
+
+After building the extension, run `pnpm test:uninstall`. Run `pnpm test:uninstall:ui` for the settings UI tests; Playwright Chromium is required.
 
 ## Security
 
-- The bridge path sits outside the `/api` trust boundary and performs its own bearer-token authentication.
-- Zero-config loopback access is pinned to this extension's stable id (derived from the public manifest `key`); unlisted extensions must present the bearer token. The key is public, so the pin stops *incidental* cross-extension access — an extension deliberately copying the key inherits the id. Deployments that must resist hostile extensions should set `trustedExtensionOrigins: []` and pair the bearer token. Firefox origins are per-install UUIDs and always present the token.
-- The exemption is loopback-only. A reverse proxy terminating on 127.0.0.1 (`tailscale serve`, `ssh -L`, nginx) makes proxied clients appear as loopback — use the hardened mode above for such deployments.
-- Privileged gateway methods such as `settings.*`, `credentials.*`, and `host.open*` reject non-loopback sources.
-- The browser-page pipeline is text-only and never captures screenshots; explicitly attached chat images use dsh's durable attachment service. Password and payment-card values never leave the page.
-- When work begins, the assistant binds to the active tab (at prompt submission, or at the first direct browser-tool call). If you switch tabs manually, later browser actions pause and the side panel asks whether the assistant should stay on the original page or follow the current one, and offers "jump back to the assistant page" to move your own tab back to the assistant's page. Choosing the original page permits background operation; apart from that button the extension never silently retargets or changes your visible tab. Closing the controlled tab also pauses tools until you explicitly select the current page.
-- Text you highlight is captured only while a side panel is open and page sharing is not `off`, and never from password or payment-card fields. It stays inside the extension until you send the message, is dropped when you dismiss it or its page navigates or closes, and reaches the model inside the same untrusted-content boundary as page snapshots — including its source title and URL, which the page also controls.
-- Page-authored text is wrapped as untrusted input. The default `auto` mode reads only the controlled tab without an extra prompt; privacy-sensitive users can select `ask` for per-read confirmation or `off` to block reads entirely. In `ask` mode, the read dialog can allow one read or persistently switch back to `auto`; this can be reversed in Settings. Read page text is sent to the selected model.
-- Click, type, keypress, navigation, history, and reload calls fail closed until the user approves them. An origin may be trusted for the current side-panel session (cleared when the last panel closes or the service worker restarts), while permanent trust is managed explicitly in Settings. Explicit cross-origin `browser_navigate` calls and unknown history destinations always prompt again.
-- **Allow unrestricted browser control** is an explicit global opt-in. It becomes active only after the setting is saved successfully; while enabled, page reads, page actions, and tab list/follow/close operations run without approval prompts. Calls capture their access mode when received, so enabling unrestricted control never retroactively elevates an existing restricted call. Disabling it takes effect immediately, cancels calls that have not dispatched an action, waits for already-dispatched browser operations to settle, and only then saves the restrictive setting. A rapid re-enable remains restricted until that revocation finishes, and concurrent saves persist in request order. Browser-protected DOM content remains inaccessible in either mode.
+- Page text read by the assistant and attachments you send are passed to the selected model.
+- Page content sharing offers **Share automatically** (default), **Ask every time**, and **Off**.
+- Text snapshots mask password and payment-card values. Screenshots capture visible pixels without masking.
+- Page operations require approval by default. You can trust individual sites or enable **Allow unrestricted browser control**. Developer tools require separate authorization.
+- When you switch tabs, the assistant asks which page to continue working on.
