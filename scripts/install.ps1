@@ -1,13 +1,13 @@
-<#
+﻿<#
 .SYNOPSIS
-dsh-browser ????(Windows):??????????? checkout ???
+dsh-browser 一键安装（Windows）：支持远程托管安装和本地 checkout 安装。
 dsh-browser one-command install (Windows): supports both managed remote installs and local checkout installs.
 
 .DESCRIPTION
-????????:???????? dsh ???(??? token)?
+之后无需任何配置：扩展自动探测本机 dsh 并连接（回环免 token）。
 No further configuration is required: the extension discovers local dsh automatically and loopback connections require no token.
 
-?? scripts/install.sh ? Windows ????,???????????? install-info.json ???
+这是 scripts/install.sh 的 Windows 对应版本，两者共享同一套托管目录与 install-info.json 约定。
 This is the Windows counterpart of scripts/install.sh; both share one managed-root and install-info.json contract.
 #>
 # This file is UTF-8 with a BOM on purpose: Windows PowerShell 5.1 decodes a BOM-less script
@@ -49,7 +49,7 @@ function Write-Pair {
 function Stop-Install {
   param([string]$Zh, [string]$En)
   Write-Host ''
-  [Console]::Error.WriteLine("??:$Zh")
+  [Console]::Error.WriteLine("错误：$Zh")
   [Console]::Error.WriteLine("Error: $En")
   exit 1
 }
@@ -243,15 +243,15 @@ function Set-ClipboardText {
 
 function Write-BrowserInstallHint {
   if (Test-Command 'winget') {
-    Write-Pair "?????:winget install --id Google.Chrome --exact" "Install it manually: winget install --id Google.Chrome --exact"
+    Write-Pair "请手动安装：winget install --id Google.Chrome --exact" "Install it manually: winget install --id Google.Chrome --exact"
   } else {
-    Write-Pair "????? Google Chrome:https://www.google.com/chrome/" "Install Google Chrome manually: https://www.google.com/chrome/"
+    Write-Pair "请手动安装 Google Chrome：https://www.google.com/chrome/" "Install Google Chrome manually: https://www.google.com/chrome/"
   }
 }
 
 function Install-Browser {
   if (-not (Test-Command 'winget')) {
-    Write-Pair "??? winget,???????" "winget was not found, so the browser cannot be installed automatically."
+    Write-Pair "未找到 winget，无法自动安装。" "winget was not found, so the browser cannot be installed automatically."
     Write-BrowserInstallHint
     return
   }
@@ -260,7 +260,7 @@ function Install-Browser {
   try {
     & winget install --id Google.Chrome --exact --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
   } catch {
-    Write-Pair "??????????" "The automatic installation reported an error."
+    Write-Pair "自动安装过程中出错。" "The automatic installation reported an error."
   } finally {
     $ErrorActionPreference = $previousPreference
   }
@@ -269,21 +269,21 @@ function Install-Browser {
 function Confirm-Browser {
   if (Get-BrowserPath) { return $true }
 
-  Write-Pair "???? Chrome/Chromium ????" "No Chrome/Chromium browser was detected."
+  Write-Pair "未检测到 Chrome/Chromium 浏览器。" "No Chrome/Chromium browser was detected."
 
   # Installing a browser is a surprising side effect for a one-line installer, so it stays
   # opt-in, exactly as scripts/install.sh does on Linux and macOS.
   if ($env:DSH_INSTALL_BROWSER -ne '1') {
     Write-BrowserInstallHint
-    Write-Pair "??????????;??? DSH_INSTALL_BROWSER=1 ??????????" "Install it and rerun this script, or set DSH_INSTALL_BROWSER=1 to let the installer attempt it."
+    Write-Pair "安装后重新运行本脚本；或设置 DSH_INSTALL_BROWSER=1 让脚本尝试自动安装。" "Install it and rerun this script, or set DSH_INSTALL_BROWSER=1 to let the installer attempt it."
     return $false
   }
 
-  Write-Pair "DSH_INSTALL_BROWSER=1,??????��" "DSH_INSTALL_BROWSER=1 is set; attempting to install�"
+  Write-Pair "DSH_INSTALL_BROWSER=1，尝试自动安装……" "DSH_INSTALL_BROWSER=1 is set; attempting to install…"
   Install-Browser
 
   if (Get-BrowserPath) { return $true }
-  Write-Pair "???????,???????,??????????????????" "Automatic browser installation did not complete; continuing, but install a browser manually before loading the extension."
+  Write-Pair "自动安装未完成，本次安装会继续，但需要你手动安装浏览器后再加载扩展。" "Automatic browser installation did not complete; continuing, but install a browser manually before loading the extension."
   return $false
 }
 
@@ -317,18 +317,18 @@ function Invoke-Quiet {
 }
 
 function Install-RemoteWorkspace {
-  Assert-Command 'Expand-Archive' "?? PowerShell ?? Expand-Archive;???? PowerShell 5.1 ??????" "This PowerShell has no Expand-Archive; upgrade to PowerShell 5.1 or newer."
+  Assert-Command 'Expand-Archive' "当前 PowerShell 缺少 Expand-Archive；请升级到 PowerShell 5.1 或更高版本。" "This PowerShell has no Expand-Archive; upgrade to PowerShell 5.1 or newer."
 
   if ((Test-Path -LiteralPath $ManagedRoot -PathType Container) -and
       -not (Test-Path -LiteralPath $ManagedMarker -PathType Leaf) -and
       @(Get-ChildItem -LiteralPath $ManagedRoot -Force).Count -gt 0) {
     Stop-Install `
-      "$ManagedRoot ???????????????;?????,???????????? .\scripts\install.ps1?" `
+      "$ManagedRoot 已存在且不是脚本托管的安装目录；为避免覆盖，请移动该目录或在其中运行 .\scripts\install.ps1。" `
       "$ManagedRoot already exists and is not managed by this installer; move it or run .\scripts\install.ps1 inside it to avoid overwriting it."
   }
 
-  Write-Pair "????????? checkout,???? clone ???" "No complete local checkout was detected; switching to the clone-free install."
-  Write-Pair "??? $Repository ? $RemoteRef ????????��" "Downloading installation files from $Repository at $RemoteRef�"
+  Write-Pair "未检测到完整的本地 checkout，切换到免 clone 安装。" "No complete local checkout was detected; switching to the clone-free install."
+  Write-Pair "正在从 $Repository 的 $RemoteRef 分支下载安装文件……" "Downloading installation files from $Repository at $RemoteRef…"
 
   # Windows PowerShell defaults to protocols GitHub no longer accepts.
   try {
@@ -348,7 +348,7 @@ function Install-RemoteWorkspace {
 
     $extracted = @(Get-ChildItem -LiteralPath $expanded -Directory)
     if ($extracted.Count -ne 1 -or -not (Test-Workspace $extracted[0].FullName)) {
-      Stop-Install "???????,????????" "The download is incomplete; the existing installation was not changed."
+      Stop-Install "下载内容不完整，未修改现有安装。" "The download is incomplete; the existing installation was not changed."
     }
 
     New-Item -ItemType Directory -Path $ManagedRoot -Force | Out-Null
@@ -359,7 +359,7 @@ function Install-RemoteWorkspace {
     Remove-Item -LiteralPath $bootstrap -Recurse -Force -ErrorAction SilentlyContinue
   }
 
-  Write-Pair "???????? $ManagedRoot?" "Installation files are ready in $ManagedRoot."
+  Write-Pair "安装文件已同步到 $ManagedRoot。" "Installation files are ready in $ManagedRoot."
 
   # Hand over to the version that was just downloaded, the way the Unix installer re-execs.
   # -ExecutionPolicy Bypass keeps a restricted machine from rejecting the freshly written file.
@@ -373,7 +373,7 @@ function Install-RemoteWorkspace {
 }
 
 if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
-  Stop-Install "install.ps1 ??? Windows;macOS ? Linux ??? scripts/install.sh?" "install.ps1 is for Windows only; run scripts/install.sh on macOS and Linux."
+  Stop-Install "install.ps1 仅用于 Windows；macOS 与 Linux 请运行 scripts/install.sh。" "install.ps1 is for Windows only; run scripts/install.sh on macOS and Linux."
 }
 
 $Root = Get-WorkspaceRoot
@@ -385,32 +385,32 @@ $WebProfileDir = Join-Path $DshHomeDir 'profiles\web'
 $WebProfileManifest = Join-Path $DshHomeDir 'profiles\web\package.json'
 $DshCli = Join-Path $Root 'node_modules\@deepseek-ai\dsh\lib\bin.js'
 
-Assert-Command 'pnpm' "??? pnpm;???? Corepack ??? pnpm?" "pnpm was not found; enable Corepack or install pnpm first."
-Assert-Command 'node' "??? Node.js;???????? Node.js ???" "Node.js was not found; install a supported Node.js version first."
+Assert-Command 'pnpm' "未找到 pnpm；请先启用 Corepack 或安装 pnpm。" "pnpm was not found; enable Corepack or install pnpm first."
+Assert-Command 'node' "未找到 Node.js；请先安装受支持的 Node.js 版本。" "Node.js was not found; install a supported Node.js version first."
 $NodeVersion = & node -p 'process.versions.node'
-if ($LASTEXITCODE -ne 0) { Stop-Install "???? Node.js ???" "Failed to read the Node.js version." }
+if ($LASTEXITCODE -ne 0) { Stop-Install "无法读取 Node.js 版本。" "Failed to read the Node.js version." }
 if ([version]$NodeVersion -lt [version]'24.9.0') {
-  Stop-Install "?? Node.js 24.9.0 ??????" "Node.js 24.9.0 or newer is required."
+  Stop-Install "需要 Node.js 24.9.0 或更新版本。" "Node.js 24.9.0 or newer is required."
 }
 
-Write-Step 1 "??????" "Build the browser bridge"
+Write-Step 1 "构建浏览器桥" "Build the browser bridge"
 Invoke-Quiet -WorkingDirectory $Root -Command 'pnpm' -Arguments @('install', '--frozen-lockfile') `
-  -FailZh "???????" -FailEn "Dependency installation failed."
+  -FailZh "依赖安装失败。" -FailEn "Dependency installation failed."
 Invoke-Quiet -WorkingDirectory $Root -Command 'pnpm' -Arguments @('--filter', $BridgePlugin, 'run', 'build') `
-  -FailZh "????????" -FailEn "The bridge plugin build failed."
+  -FailZh "桥插件构建失败。" -FailEn "The bridge plugin build failed."
 
-Write-Step 2 "????? web profile" "Register with the local web profile"
+Write-Step 2 "注册到本机 web profile" "Register with the local web profile"
 # Initialize through dsh without forwarding a package path through cmd.exe.
 if (-not (Test-Path -LiteralPath $WebProfileManifest -PathType Leaf)) {
   Invoke-Quiet -WorkingDirectory $Root -Command 'node' `
     -Arguments @($DshCli, 'plugin', '--profile', 'web', 'install') `
-    -FailZh "??? web profile ???" -FailEn "Initializing the web profile failed."
+    -FailZh "初始化 web profile 失败。" -FailEn "Initializing the web profile failed."
 }
 
 if (Test-ProfileDependency -Manifest $WebProfileManifest -PackageName $LegacyPlugin) {
   Invoke-Quiet -WorkingDirectory $WebProfileDir -Command 'pnpm' `
     -Arguments @('remove', '-w', $LegacyPlugin) `
-    -FailZh "????????" -FailEn "Removing the legacy plugin failed."
+    -FailZh "移除旧插件失败。" -FailEn "Removing the legacy plugin failed."
 }
 
 # A profile-local junction keeps the link spec free of absolute Windows paths.
@@ -421,7 +421,7 @@ if (Test-Path -LiteralPath $ProfileSourceLink) {
   $SourceItem = Get-Item -LiteralPath $ProfileSourceLink -Force
   if (-not ($SourceItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
     Stop-Install `
-      "$ProfileSourceLink ??????????;??????????" `
+      "$ProfileSourceLink 已存在且不是目录联接；请移动该路径后重试。" `
       "$ProfileSourceLink exists and is not a directory junction; move it and retry."
   }
   $ExistingTarget = [System.IO.Path]::GetFullPath([string]$SourceItem.Target)
@@ -435,7 +435,7 @@ if (Test-Path -LiteralPath $ProfileSourceLink) {
 
 Invoke-Quiet -WorkingDirectory $WebProfileDir -Command 'pnpm' `
   -Arguments @('add', '-w', 'link:./.dsh-browser-source') `
-  -FailZh "????????" -FailEn "Registering the bridge plugin failed."
+  -FailZh "注册桥插件失败。" -FailEn "Registering the bridge plugin failed."
 
 # The direct pnpm registration above bypasses dsh's bundle-roster update.
 $ProfileManifest = Get-Content -LiteralPath $WebProfileManifest -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -448,11 +448,11 @@ $ProfileJson = ($ProfileManifest | ConvertTo-Json -Depth 20) + "`n"
   $ProfileJson,
   (New-Object System.Text.UTF8Encoding $false))
 
-Write-Step 3 "?? Chrome ??" "Build the Chrome extension"
+Write-Step 3 "构建 Chrome 扩展" "Build the Chrome extension"
 Invoke-Quiet -WorkingDirectory $Root -Command 'pnpm' -Arguments @('--filter', 'dsh-browser-extension', 'run', 'build') `
-  -FailZh "???????" -FailEn "The extension build failed."
+  -FailZh "扩展构建失败。" -FailEn "The extension build failed."
 
-Write-Step 4 "??????? Chrome" "Prepare the extension and open Chrome"
+Write-Step 4 "准备扩展并打开 Chrome" "Prepare the extension and open Chrome"
 Confirm-Browser | Out-Null
 $DistDir = Join-Path $DshHomeDir 'browser-extension'
 $IsUpdate = Test-Path -LiteralPath (Join-Path $DistDir 'manifest.json') -PathType Leaf
@@ -462,59 +462,57 @@ Sync-Directory -Source (Join-Path $Ext 'dist') -Destination $DistDir
 $InstallMode = if (Test-Path -LiteralPath (Join-Path $Root '.managed-by-install-sh') -PathType Leaf) { 'managed' } else { 'checkout' }
 & node (Join-Path $Root 'scripts\write-install-info.mjs') `
   (Join-Path $DistDir 'install-info.json') $InstallMode $Root $DshHomeDir
-if ($LASTEXITCODE -ne 0) { Stop-Install '?????????' 'Writing install metadata failed.' }
+if ($LASTEXITCODE -ne 0) { Stop-Install '写入安装信息失败。' 'Writing install metadata failed.' }
 
 $ClipboardReady = Set-ClipboardText $DistDir
 $ChromeOpened = Start-ExtensionsPage (Get-BrowserPath)
 
 Write-Host ''
 if (-not $ChromeOpened) {
-  Write-Pair "?????? Chrome,??????????????? chrome://extensions?" "Could not open Chrome automatically; open the browser and type chrome://extensions in the address bar."
+  Write-Pair "无法自动打开 Chrome，请手动打开浏览器并在地址栏输入 chrome://extensions。" "Could not open Chrome automatically; open the browser and type chrome://extensions in the address bar."
 }
-# PowerShell treats the typographic quotes � � as string delimiters, so every message that
+# PowerShell treats the typographic quotes “ ” as string delimiters, so every message that
 # contains them has to use single-quoted literals or it splits into extra arguments.
 if ($IsUpdate) {
-  Write-Pair "?????????,????????" "Existing extension directory detected; its files were updated safely."
-  Write-Pair "???????:?? id ???? manifest key ????;?????????/token,??????????" "Updating from an older build: the extension id changes once (stable manifest key); re-enter the bridge address/token in the panel if you had configured a remote bridge."
-  Write-Pair "?? Google Chrome(???? Edge/Firefox):" "Open Google Chrome (not Edge/Firefox):"
+  Write-Pair "检测到已有扩展目录，文件已安全更新。" "Existing extension directory detected; its files were updated safely."
+  Write-Pair "打开 Google Chrome（注意不是 Edge/Firefox）：" "Open Google Chrome (not Edge/Firefox):"
   Write-Host ''
-  Write-Pair "    ????? chrome://extensions" "    Type chrome://extensions in the address bar"
+  Write-Pair "    地址栏输入 chrome://extensions" "    Type chrome://extensions in the address bar"
   Write-Host ''
-  Write-Pair '???????�dsh ?????�??:' 'If the �dsh Browser Assistant� card is already listed:'
-  Write-Pair '  ??????�????�??,?????????' '  Click �Reload� on that card so it picks up the updated files.'
+  Write-Pair '如果页面上已有“dsh 浏览器助手”卡片：' 'If the “dsh Browser Assistant” card is already listed:'
+  Write-Pair '  点击卡片上的“重新加载”按钮，让扩展加载新文件。' '  Click “Reload” on that card so it picks up the updated files.'
   Write-Host ''
-  Write-Pair "???????(???????):" "If the card is not listed (e.g. it was never loaded):"
-  Write-Pair '  ????? �?????�' '  Enable �Developer mode� in the upper-right corner'
-  Write-Pair '  ???? �??????????�' '  Click �Load unpacked� in the upper-left corner'
-  Write-Pair "  ??????:" "  Select this directory:"
+  Write-Pair "如果没有该卡片（例如从未加载过）：" "If the card is not listed (e.g. it was never loaded):"
+  Write-Pair '  打开右上角 “开发者模式”' '  Enable “Developer mode” in the upper-right corner'
+  Write-Pair '  点左上角 “加载已解压的扩展程序”' '  Click “Load unpacked” in the upper-left corner'
+  Write-Pair "  选择这个目录：" "  Select this directory:"
   Write-Host ("   {0}" -f $DistDir)
   Write-Host ''
-  Write-Pair '?? �dsh ?????� ??????' 'When the �dsh Browser Assistant� card appears, it is loaded.'
+  Write-Pair '出现 “dsh 浏览器助手” 卡片即成功。' 'When the “dsh Browser Assistant” card appears, it is loaded.'
 } else {
   if ($ChromeOpened) {
-    Write-Pair "Chrome ????????,???????:" "Chrome Extensions is open. Complete these steps:"
+    Write-Pair "Chrome 扩展管理页已打开，请完成以下操作：" "Chrome Extensions is open. Complete these steps:"
   } else {
-    Write-Pair "?? Chrome ???????????:" "Complete these steps on the Chrome Extensions page:"
+    Write-Pair "请在 Chrome 扩展管理页完成以下操作：" "Complete these steps on the Chrome Extensions page:"
   }
   Write-Host ''
-  Write-Pair '1. ??????�?????�' 'Enable �Developer mode� in the upper-right corner'
-  Write-Pair '2. ??�??????????�' 'Click �Load unpacked�'
+  Write-Pair '1. 开启右上角的“开发者模式”' 'Enable “Developer mode” in the upper-right corner'
+  Write-Pair '2. 点击“加载已解压的扩展程序”' 'Click “Load unpacked”'
   if ($ClipboardReady) {
-    Write-Pair "3. ??????????(???????):" "Paste this path into the folder picker's address bar (already copied):"
+    Write-Pair "3. 在路径栏粘贴以下路径（已复制到剪贴板）：" "Paste this path into the folder picker's address bar (already copied):"
   } else {
-    Write-Pair "3. ?????????????:" "Copy and paste this path into the folder picker's address bar:"
+    Write-Pair "3. 在路径栏复制并粘贴以下路径：" "Copy and paste this path into the folder picker's address bar:"
   }
   Write-Host ("   {0}" -f $DistDir)
 }
 
 Write-Host ''
-Write-Pair "?????:" "After loading the extension:"
-Write-Pair "� ??????? DeepSeek ????,?????" "Click the DeepSeek whale icon in the toolbar to open the side panel"
-Write-Pair "� ????????? dsh,??????? token" "The extension discovers local dsh automatically; no address or token is required"
+Write-Pair "加载完成后：" "After loading the extension:"
+Write-Pair "• 点击工具栏中的 DeepSeek 鲸鱼图标，打开侧边栏" "Click the DeepSeek whale icon in the toolbar to open the side panel"
+Write-Pair "• 扩展会自动发现本机 dsh，无需填写地址或 token" "The extension discovers local dsh automatically; no address or token is required"
 $QuotedRoot = "'" + $Root.Replace("'", "''") + "'"
-Write-Host ("� ??????:cd {0}; pnpm start" -f $QuotedRoot)
+Write-Host ("• 启动固定版本：cd {0}; pnpm start" -f $QuotedRoot)
 Write-Host ("   Start the pinned version: cd {0}; pnpm start" -f $QuotedRoot)
-Write-Pair "� ?????????:npx @deepseek-ai/dsh@0.2.2-rc.5 web" "Or start the pinned version directly: npx @deepseek-ai/dsh@0.2.2-rc.5 web"
-
+Write-Pair "• 或直接启动固定版本：npx @deepseek-ai/dsh@0.2.2-rc.5 web" "Or start the pinned version directly: npx @deepseek-ai/dsh@0.2.2-rc.5 web"
 Write-Host ''
-Write-Pair "?? graydovee fork;????? https://github.com/Lum1104/dsh-browser(?????? Star)?" "This is the graydovee fork; upstream lives at https://github.com/Lum1104/dsh-browser (stars belong there)."
+Write-Pair "这是 graydovee fork；上游项目在 https://github.com/Lum1104/dsh-browser（欢迎给上游点 Star）。" "This is the graydovee fork; upstream lives at https://github.com/Lum1104/dsh-browser (stars belong there)."
