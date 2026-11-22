@@ -234,7 +234,8 @@ describe('registerBrowserTools', () => {
     const follow = byName.get('browser_follow_tab')!.parameters as { properties: Record<string, unknown> }
     expect(follow.properties.activate).toBeDefined()
     const scroll = byName.get('browser_scroll')!.parameters as { properties: Record<string, unknown>; required?: string[] }
-    expect(scroll.required).toContain('direction')
+    expect(scroll.properties.point).toBeDefined()
+    expect(scroll.required ?? []).not.toContain('direction')
   })
 
   it('validates upload paths on the host before dispatching', async () => {
