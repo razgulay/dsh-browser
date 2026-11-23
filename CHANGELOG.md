@@ -3,8 +3,8 @@
 **English** | [中文](CHANGELOG.zh-CN.md)
 
 ## latest
+* 2026-11-23 [Feature] The page-handoff prompt is now a single row above the composer instead of a card that filled a large part of the panel: each page shows its own site icon, and the full titles plus what each choice will do appear on hover or keyboard focus.
 * 2026-10-25 [Fix] Works with dsh 0.2.1-rc.3: the plugin loads and runs unchanged on the new release, and dsh 0.2.1-rc.2 hosts remain supported.
-
 ## v0.1.8
 * 2026-10-21 [Feature] Browser actions gain a general input layer: pointer gestures and coordinates, key chords and held keys, caret and per-character text, rich clipboard paste, file uploads, and single-iframe reads. Input runs in the background without activating tabs or moving the system pointer.
 * 2026-10-21 [Refactor] Auto-detect no longer sweeps the local ephemeral port range.

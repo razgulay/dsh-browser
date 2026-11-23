@@ -12,7 +12,7 @@ import { BRIDGE_SESSION_PURGE_METHOD, DEFAULT_SNAPSHOT_MAX_CHARS } from '@yuxian
 import type { BridgeCaps } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
 import type { ServerFrame } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
 import type { BridgeState } from '../background/bridge.ts'
-import type { AffinityTab, TabAffinityDecision, TabAffinityState } from '../background/tab-affinity.ts'
+import type { AffinityTab, TabAffinityDecision, TabAffinityState, TabAffinityStatus } from '../background/tab-affinity.ts'
 import { connectPanel, PanelRpcError, type BridgeInstance, type DevToolsStatus, type DiscoveryStatus, type PanelApi, type PanelSettings } from './api.ts'
 import { renderMarkdown } from './markdown.ts'
 import whaleUrl from '../../assets/icons/deepseek-256.png'
@@ -26,6 +26,7 @@ import {
   type UiLocalePreference,
 } from '../i18n.ts'
 import { PANEL_COPY, type PanelCopy } from './strings.ts'
+import { normalizeFaviconUrl } from '../security/favicon.ts'
 import {
   applyUiScale,
   DEFAULT_UI_SCALE,
@@ -481,6 +482,83 @@ function tabLabel(tab: AffinityTab | null, unknownTab: string): string {
   }
 }
 
+/** Hostname without a leading `www.`, for the letter tile. */
+function tabHost(tab: AffinityTab | null): string {
+  try {
+    return new URL(tab?.url ?? '').hostname.replace(/^www\./, '')
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Letter shown when a page has no usable icon.
+ *
+ * The first character is not good enough: an IP host (`127.0.0.1`) or a port
+ * gives a digit, which reads as a badge count rather than an avatar. The first
+ * *letter* of the host is used instead, and a host with none falls back to the
+ * role's own initial.
+ */
+function tabLetter(tab: AffinityTab | null, role: 'assistant' | 'you'): string {
+  const host = tabHost(tab)
+  if (host === '') return role === 'assistant' ? 'A' : 'Y'
+  const letter = /[a-z]/i.exec(host)?.[0]
+  return letter === undefined ? '#' : letter.toUpperCase()
+}
+
+/**
+ * One round favicon chip.
+ *
+ * The icon is page-authored data, so it is narrowed again here even though the
+ * service worker already did: the panel must not be the only thing standing
+ * between a hostile `favIconUrl` and an `<img src>`. When the value is absent,
+ * rejected, or simply fails to load, the chip keeps its size and shows a
+ * letter tile instead — a collapsed chip would shift the whole row.
+ */
+function TabFavicon({
+  tab,
+  role,
+  tone,
+  tip,
+}: {
+  tab: AffinityTab | null
+  role: 'assistant' | 'you'
+  tone: 'controlling' | 'active' | 'closed' | 'idle'
+  tip: string
+}): React.JSX.Element {
+  const [failed, setFailed] = useState(false)
+  const source = tab === null ? undefined : normalizeFaviconUrl(tab.favIconUrl)
+  return (
+    <span
+      className="tab-affinity-chip"
+      data-tone={tone}
+      data-tip={tip}
+      data-role={role}
+      tabIndex={0}
+      role="img"
+      aria-label={tip}
+    >
+      <span className="tab-affinity-letter" aria-hidden="true">{tabLetter(tab, role)}</span>
+      {source !== undefined && !failed && (
+        <img src={source} alt="" decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+      )}
+    </span>
+  )
+}
+
+/**
+ * The tab-affinity bar: one row, pinned just above the composer.
+ *
+ * It replaces a stacked card (eyebrow, question, two tab rows, a paragraph and
+ * two full-width buttons) that took a large part of the panel for a one-click
+ * answer. Status now lives in two places instead: the chip tones (colour, and
+ * grey plus a strike when the controlled tab is gone) and the tooltips, which
+ * carry the full titles and the consequence of each choice. The visible row
+ * keeps only what must be read to act: the two page names and the buttons.
+ *
+ * A screen-reader-only line still spells the state out, because an `aria-label`
+ * on an image does not announce when it changes.
+ */
 function TabAffinityBanner({
   state,
   copy,
@@ -495,41 +573,50 @@ function TabAffinityBanner({
   const active = tabLabel(state.active, copy.tabHandoff.unknownTab)
   const lost = state.status === 'lost'
   const handoff = state.status === 'handoff'
-  const title = lost
-    ? copy.tabHandoff.lostTitle
-    : handoff
-      ? copy.tabHandoff.questionTitle
-      : copy.tabHandoff.backgroundTitle(controlled)
-  const body = lost
-    ? copy.tabHandoff.lostBody
-    : handoff
-      ? copy.tabHandoff.questionBody(controlled, active)
-      : state.pinned
-        ? copy.tabHandoff.pinnedBody(active)
-        : copy.tabHandoff.backgroundBody(active)
+  // `background` is the calm split the user already accepted; `lost` has no
+  // controlled page left to describe.
+  const resting: TabAffinityStatus = lost ? 'lost' : 'background'
+  const assistantStatus: TabAffinityStatus = lost ? 'lost' : handoff ? 'handoff' : 'background'
 
   return (
-    <section className={`tab-affinity ${state.status}`} role={handoff || lost ? 'alert' : 'status'}>
-      <div className="tab-affinity-heading">
-        <span className="eyebrow">{copy.tabHandoff.eyebrow}</span>
-        <strong>{title}</strong>
-      </div>
-      <div className="tab-affinity-route" aria-hidden="true">
-        <span className={`tab-affinity-node ${lost ? 'closed' : 'controlled'}`}>
-          <small>{copy.tabHandoff.assistant}</small>
-          <span title={controlled}>{controlled}</span>
+    <section
+      className={`tab-affinity ${state.status}`}
+      role={handoff || lost ? 'alert' : 'status'}
+    >
+      <p className="tab-affinity-sr">
+        {lost
+          ? copy.tabHandoff.assistantTip(controlled, 'lost')
+          : `${copy.tabHandoff.assistantTip(controlled, assistantStatus)} ${copy.tabHandoff.youTip(active, assistantStatus)}`}
+      </p>
+      <div className="tab-affinity-route">
+        <span className="tab-affinity-node">
+          <TabFavicon
+            tab={state.controlled}
+            role="assistant"
+            tone={lost ? 'closed' : 'controlling'}
+            tip={copy.tabHandoff.assistantTip(controlled, assistantStatus)}
+          />
+          <span className="tab-affinity-name" title={controlled}>{controlled}</span>
         </span>
-        <span className="tab-affinity-arrow">→</span>
-        <span className="tab-affinity-node active">
-          <small>{copy.tabHandoff.you}</small>
-          <span title={active}>{active}</span>
+        <span className={`tab-affinity-link${lost ? ' severed' : ''}`} aria-hidden="true" />
+        <span className="tab-affinity-node">
+          <TabFavicon
+            tab={state.active}
+            role="you"
+            tone={lost || handoff ? 'active' : 'idle'}
+            tip={copy.tabHandoff.youTip(active, resting)}
+          />
+          <span className="tab-affinity-name" title={active}>{active}</span>
         </span>
       </div>
-      {!handoff && <p>{body}</p>}
       <div className="tab-affinity-actions">
-        {handoff && <button className="keep" onClick={() => onDecision('keep')}>{copy.tabHandoff.keep}</button>}
+        {handoff && (
+          <button type="button" className="keep" title={copy.tabHandoff.keep}
+            onClick={() => onDecision('keep')}>{copy.tabHandoff.keep}</button>
+        )}
         {state.active !== null && (
-          <button className="follow" onClick={() => onDecision('follow')}>
+          <button type="button" className="follow" title={copy.tabHandoff.follow}
+            onClick={() => onDecision('follow')}>
             {lost ? copy.tabHandoff.useCurrent : handoff ? copy.tabHandoff.follow : copy.tabHandoff.followCurrent}
           </button>
         )}
@@ -2904,11 +2991,6 @@ export function App(): React.JSX.Element {
             aria-label={copy.app.openSettings} title={copy.app.settings}><SettingsIcon /></button>
         </div>
       </header>
-      <TabAffinityBanner
-        state={tabAffinity}
-        copy={copy}
-        onDecision={decideTabAffinity}
-      />
       {showSessionPicker && (
         <section className="session-picker" aria-label={copy.app.sessions}>
           <div className="session-picker-head">
@@ -3018,6 +3100,11 @@ export function App(): React.JSX.Element {
       )}
       {error !== null && <div className="error">{error}</div>}
       {notice !== null && <div className="notice">{notice}</div>}
+      <TabAffinityBanner
+        state={tabAffinity}
+        copy={copy}
+        onDecision={decideTabAffinity}
+      />
       <footer className="composer">
         {showSlashMenu ? (
           <div className="slash-menu" role="listbox" aria-label={copy.app.slashMenu} ref={slashMenuRef}>

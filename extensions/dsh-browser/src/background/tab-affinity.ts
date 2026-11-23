@@ -20,6 +20,15 @@ export interface AffinityTab {
   windowId: number
   title: string
   url: string
+  /**
+   * Already narrowed by `normalizeFaviconUrl`, never the raw tab field. Absent
+   * means "no usable icon", so the panel falls back to a letter tile.
+   *
+   * It is deliberately excluded from `sameTab`: an icon that loads a moment
+   * after a tab switch must not bump the revision, because a bumped revision
+   * silently invalidates the handoff answer the user is already clicking.
+   */
+  favIconUrl?: string
 }
 
 export type TabAffinityStatus = 'unbound' | 'following' | 'handoff' | 'background' | 'lost'
@@ -174,6 +183,39 @@ export class TabAffinityController {
       if (sTab.tabId === tab.tabId) this.sessionTabs.set(sid, { ...tab })
     }
     return this.bumpIfChanged(previousActive, previousControlled, previousKept)
+  }
+
+  /**
+   * Refresh only a tracked tab's favicon.
+   *
+   * A favicon routinely settles after the title and after a tab switch, so it
+   * is handled apart from `observeTab`: the panel must be re-broadcast to show
+   * the icon, but the revision must not move, or the answer the user is part
+   * way through clicking would be discarded as stale.
+   *
+   * @returns true when a cached icon actually changed.
+   */
+  observeFavicon(tab: AffinityTab): boolean {
+    const next = tab.favIconUrl
+    let changed = false
+    const apply = (current: AffinityTab | null): AffinityTab | null => {
+      if (current === null || current.tabId !== tab.tabId) return current
+      if (current.favIconUrl === next) return current
+      changed = true
+      // `undefined` drops the key so the panel sees "no icon", not an empty one.
+      const { favIconUrl: _dropped, ...rest } = current
+      return next === undefined ? rest : { ...current, favIconUrl: next }
+    }
+    this.active = apply(this.active)
+    this.controlled = apply(this.controlled)
+    for (const [sid, sTab] of this.sessionTabs.entries()) {
+      if (sTab.tabId === tab.tabId && sTab.favIconUrl !== next) {
+        changed = true
+        const { favIconUrl: _dropped, ...rest } = sTab
+        this.sessionTabs.set(sid, next === undefined ? rest : { ...sTab, favIconUrl: next })
+      }
+    }
+    return changed
   }
 
   /** Bind the first prompt/direct browser call to the then-active tab. */

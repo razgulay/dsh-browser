@@ -155,6 +155,76 @@ describe('tab handoff banner', () => {
     })
 
     // The background banner keeps its own wording: it offers to follow, not to answer.
-    expect(actionLabels()).toEqual(['Follow the current page'])
+    expect(actionLabels()).toEqual(['Follow'])
+  })
+
+  it('renders each page as its favicon chip, with the full title in the tooltip', async () => {
+    await renderConnected()
+    await pushAffinity({
+      revision: 5,
+      status: 'handoff',
+      controlled: { ...controlled, favIconUrl: 'https://example.com/favicon.ico' },
+      active: { ...active, favIconUrl: 'data:image/png;base64,iVBORw0KGgo=' },
+      pinned: false,
+    })
+
+    const chips = [...document.querySelectorAll<HTMLElement>('.tab-affinity-chip')]
+    expect(chips).toHaveLength(2)
+    expect(chips[0]?.querySelector('img')?.getAttribute('src')).toBe('https://example.com/favicon.ico')
+    expect(chips[1]?.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,iVBORw0KGgo=')
+    expect(chips[0]?.dataset.tip).toContain('Pull request #3')
+    expect(chips[1]?.dataset.tip).toContain('README')
+  })
+
+  it('refuses an unsafe favicon and falls back to a letter tile', async () => {
+    await renderConnected()
+    await pushAffinity({
+      revision: 6,
+      status: 'handoff',
+      // A hostile page can put anything in favIconUrl; the panel must not render it.
+      controlled: { ...controlled, favIconUrl: 'javascript:alert(1)' },
+      active: { ...active, favIconUrl: 'data:text/html,<script>alert(1)</script>' },
+      pinned: false,
+    })
+
+    const chips = [...document.querySelectorAll<HTMLElement>('.tab-affinity-chip')]
+    expect(chips).toHaveLength(2)
+    for (const chip of chips) {
+      expect(chip.querySelector('img')).toBeNull()
+      // The row must not lose its geometry when the icon is unusable.
+      expect(chip.querySelector('.tab-affinity-letter')?.textContent).toMatch(/^[A-Z#]$/)
+    }
+  })
+
+  it('never renders a digit as the fallback initial', async () => {
+    await renderConnected()
+    await pushAffinity({
+      revision: 7,
+      status: 'handoff',
+      // An IP host has no leading letter; a digit would read as a badge count.
+      controlled: { tabId: 1, windowId: 1, title: 'Gateway', url: 'http://127.0.0.1:3080/' },
+      active,
+      pinned: false,
+    })
+
+    const chips = [...document.querySelectorAll<HTMLElement>('.tab-affinity-chip')]
+    expect(chips[0]?.querySelector('.tab-affinity-letter')?.textContent).not.toMatch(/^\d$/)
+  })
+
+  it('greys and strikes the assistant chip when the controlled tab is gone', async () => {
+    await renderConnected()
+    await pushAffinity({
+      revision: 8,
+      status: 'lost',
+      controlled: null,
+      active,
+      pinned: false,
+    })
+
+    const assistant = document.querySelector<HTMLElement>('.tab-affinity-chip[data-role="assistant"]')
+    expect(assistant?.dataset.tone).toBe('closed')
+    expect(document.querySelector('.tab-affinity-link')?.classList.contains('severed')).toBe(true)
+    const name = document.querySelector('.tab-affinity-node:first-child .tab-affinity-name')
+    expect(name?.textContent).toBe('Closed tab')
   })
 })

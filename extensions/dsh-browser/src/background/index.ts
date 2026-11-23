@@ -78,6 +78,7 @@ import {
   actionCoveredByTrustedOrigins,
   normalizeTrustedOrigin,
 } from '../security/trusted-origins.ts'
+import { normalizeFaviconUrl } from '../security/favicon.ts'
 import { TransientEventCache } from './transient-events.ts'
 import {
   TabAffinityController,
@@ -803,11 +804,16 @@ function cancelPendingApprovals(sessionId?: string): void {
 
 function summarizeTab(tab: chrome.tabs.Tab): AffinityTab | null {
   if (tab.id === undefined) return null
+  // The icon is page-authored, so it is narrowed here rather than in the panel:
+  // everything downstream (session storage, the wire, React) then carries only
+  // a value an <img> may safely load.
+  const favIconUrl = normalizeFaviconUrl(tab.favIconUrl)
   return {
     tabId: tab.id,
     windowId: tab.windowId,
     title: tab.title ?? '',
     url: tab.url ?? '',
+    ...(favIconUrl === undefined ? {} : { favIconUrl }),
   }
 }
 
@@ -2272,7 +2278,12 @@ chrome.tabs.onUpdated.addListener((tabId, _changeInfo, tab) => {
   void affinityReady.then(() => {
     if (!tabAffinity.tracks(tabId)) return
     const summary = summarizeTab(tab)
-    if (summary !== null && tabAffinity.observeTab(summary)) broadcastTabAffinity()
+    if (summary === null) return
+    // A favicon often settles after the title and after a tab switch. Refresh
+    // the panel for it, but never bump the revision: a bump would reject the
+    // handoff answer the user is in the middle of clicking.
+    const iconChanged = tabAffinity.observeFavicon(summary)
+    if (tabAffinity.observeTab(summary) || iconChanged) broadcastTabAffinity()
   })
 })
 

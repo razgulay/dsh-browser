@@ -345,3 +345,63 @@ describe('TabAffinityController', () => {
     expect(restoredAffinity.allowsTarget(2, 'session-missing')).toBe(false)
   })
 })
+
+/**
+ * A favicon settles later than the title and often later than the tab switch
+ * that raised the handoff. It must reach the panel, and must not invalidate the
+ * answer the user is already clicking.
+ */
+describe('TabAffinityController favicon refresh', () => {
+  it('updates the icon without moving the revision the handoff was shown for', () => {
+    const affinity = new TabAffinityController()
+    affinity.observeActive(tab(1))
+    affinity.bindInitial(tab(1))
+    affinity.observeActive(tab(2))
+    const handoff = affinity.snapshot()
+
+    const withIcon: AffinityTab = { ...tab(2), favIconUrl: 'https://example.com/icon.png' }
+    expect(affinity.observeFavicon(withIcon)).toBe(true)
+
+    const after = affinity.snapshot()
+    expect(after.active?.favIconUrl).toBe('https://example.com/icon.png')
+    expect(after.revision).toBe(handoff.revision)
+    // The very choice the user saw still applies.
+    expect(affinity.decide('follow', handoff.revision)).toBe(true)
+  })
+
+  it('reports no change when the icon is identical, and follows a cleared icon', () => {
+    const affinity = new TabAffinityController()
+    const icon = { ...tab(1), favIconUrl: 'https://example.com/icon.png' }
+    affinity.observeActive(icon)
+    affinity.bindInitial(icon)
+
+    expect(affinity.observeFavicon(icon)).toBe(false)
+    expect(affinity.observeFavicon(tab(1))).toBe(true)
+    expect(affinity.snapshot().controlled?.favIconUrl).toBeUndefined()
+  })
+
+  it('touches every tracked copy of the tab, since panels read the session map too', () => {
+    const affinity = new TabAffinityController()
+    const bound = tab(1)
+    affinity.observeActive(bound)
+    affinity.bindInitial(bound, 'session-1')
+    affinity.bindSession('session-2', bound)
+
+    const icon = { ...bound, favIconUrl: 'https://example.com/icon.png' }
+    expect(affinity.observeFavicon(icon)).toBe(true)
+    expect(affinity.getSessionTab('session-1')?.favIconUrl).toBe('https://example.com/icon.png')
+    expect(affinity.getSessionTab('session-2')?.favIconUrl).toBe('https://example.com/icon.png')
+  })
+
+  it('never lets an icon alone count as a tab change', () => {
+    const affinity = new TabAffinityController()
+    affinity.observeActive(tab(1))
+    affinity.bindInitial(tab(1))
+    const before = affinity.snapshot()
+
+    affinity.observeTab({ ...tab(1), favIconUrl: 'https://example.com/icon.png' })
+    // observeTab refreshes metadata, so the icon lands; the revision is what
+    // decides whether a pending answer survives, and identity did not change.
+    expect(affinity.snapshot().revision).toBe(before.revision)
+  })
+})

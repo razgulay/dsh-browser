@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   color-scheme: light;
   /* Panel-wide text scale. The side panel has no browser zoom control, so the
      topbar "Aa" button writes this token and every font-size is a multiple of
@@ -124,231 +124,300 @@ textarea:focus-visible {
   background: rgba(255, 255, 255, 0.92);
 }
 
+/* ---------------------------------------------------------------------------
+   Tab-affinity bar: one row, pinned just above the composer.
+
+   It replaces a stacked card (eyebrow + question + two tab rows + a paragraph
+   + two full-width buttons) that took a large part of the panel for a one-click
+   answer. The state now rides on the two icon chips and their tooltips; the
+   visible row keeps only the two page names and the buttons.
+   --------------------------------------------------------------------------- */
+
 .tab-affinity {
   position: relative;
+  display: flex;
   flex: 0 0 auto;
-  margin: 10px 12px 0;
-  overflow: hidden;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  box-shadow: var(--shadow-pop);
-  animation: pop-in 0.16s ease-out;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  margin: 8px 12px 0;
+  padding: 4px 6px 4px 8px;
+  border: 1px solid #eadbbd;
+  border-radius: 10px;
+  background: #fffdf8;
 }
 
-.tab-affinity::before {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: var(--warning);
-  content: "";
-  display: none;
-}
-
+/* A split the user already accepted is calm, not alarming. */
 .tab-affinity.background {
-  border-color: var(--line);
-  background: var(--surface);
-}
-
-.tab-affinity.background::before {
-  background: var(--blue);
+  border-color: #dce3ff;
+  background: #f9faff;
 }
 
 .tab-affinity.lost {
-  border-color: var(--danger-border);
-  background: var(--surface);
+  border-color: #f3d0cc;
+  background: #fffafa;
 }
 
-.tab-affinity.lost::before {
-  background: var(--danger);
-}
-
-.tab-affinity-heading {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
-}
-
-.tab-affinity-heading .eyebrow {
-  display: none;
-  color: var(--security);
-  font-size: calc(8.5px * var(--ui-scale));
-  letter-spacing: 0.1em;
+/* State for assistive tech. The chips carry `aria-label`s, but those do not
+   announce when they change, so the bar keeps one live description. */
+.tab-affinity-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
   white-space: nowrap;
-}
-
-.tab-affinity.background .tab-affinity-heading .eyebrow {
-  color: var(--blue-ink);
-}
-
-.tab-affinity.lost .tab-affinity-heading .eyebrow {
-  color: var(--danger);
-}
-
-.tab-affinity-heading strong {
-  min-width: 0;
-  color: var(--ink-strong);
-  font-family: "Avenir Next", "Segoe UI Variable Display", "PingFang SC", sans-serif;
-  font-size: calc(13.5px * var(--ui-scale));
-  font-weight: 720;
-  letter-spacing: -0.022em;
-  line-height: 1.3;
+  border: 0;
 }
 
 .tab-affinity-route {
-  position: relative;
-  display: grid;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 5px;
   min-width: 0;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 3px;
-  margin-top: 10px;
 }
 
 .tab-affinity-node {
-  position: relative;
-  z-index: 1;
-  display: grid;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
-  grid-template-columns: 12px calc(48px * var(--ui-scale)) minmax(0, 1fr);
-  align-items: baseline;
-  gap: 5px;
-  padding: 2px 0;
 }
 
-.tab-affinity-node::before {
-  width: 8px;
-  height: 8px;
-  align-self: center;
-  border: 2px solid #fff;
-  border-radius: 50%;
-  background: var(--blue);
-  box-shadow: 0 0 0 1px #aebdff;
-  content: "";
-}
-
-.tab-affinity-node small {
-  color: var(--faint);
-  font-size: calc(9px * var(--ui-scale));
-  font-weight: 680;
-  letter-spacing: 0.02em;
-  line-height: 1.35;
-}
-
-.tab-affinity-node > span {
+.tab-affinity-name {
   overflow: hidden;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: calc(104px * var(--ui-scale));
   color: var(--ink);
-  font-size: calc(11px * var(--ui-scale));
-  font-weight: 620;
-  line-height: 1.35;
+  font-size: calc(10.5px * var(--ui-scale));
+  font-weight: 640;
+  line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.tab-affinity-node.active::before {
-  background: #22a06b;
-  box-shadow: 0 0 0 1px #8dd8b8;
-}
-
-.tab-affinity-node.closed::before {
-  background: var(--danger);
-  box-shadow: 0 0 0 1px #eeaaa3;
-}
-
-.tab-affinity-node.closed > span {
+.tab-affinity.lost .tab-affinity-node:first-child .tab-affinity-name {
   color: var(--faint);
   text-decoration: line-through;
+  text-decoration-thickness: 1px;
 }
 
-.tab-affinity-arrow {
+/* The dashed run between the two pages, with an arrowhead at the far end. */
+.tab-affinity-link {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 10px;
+  height: 0;
+  border-top: 1.5px dashed var(--line-strong);
+}
+
+.tab-affinity-link::after {
   position: absolute;
-  z-index: 0;
-  top: 10px;
-  bottom: 10px;
-  left: 3.5px;
-  width: 1px;
-  overflow: hidden;
-  background: var(--line-strong);
-  color: transparent;
-  font-size: 0;
+  top: -3px;
+  right: -1px;
+  width: 5px;
+  height: 5px;
+  border-top: 1.5px solid var(--line-strong);
+  border-right: 1.5px solid var(--line-strong);
+  transform: rotate(45deg);
+  content: "";
 }
 
-.tab-affinity > p {
-  margin: 9px 0 0;
-  color: var(--muted);
-  font-size: calc(10.5px * var(--ui-scale));
-  line-height: 1.45;
+/* A severed link is the fastest read that the binding no longer exists. */
+.tab-affinity-link.severed {
+  border-top-style: dotted;
+  border-top-color: #e6c9c5;
 }
+
+.tab-affinity-link.severed::after {
+  display: none;
+}
+
+/* --- favicon chip ------------------------------------------------------- */
+
+.tab-affinity-chip {
+  position: relative;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #eef1f7;
+  box-shadow: 0 0 0 1px rgba(23, 32, 51, 0.1);
+}
+
+.tab-affinity-chip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.tab-affinity-chip img {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* The tile underneath is always painted, so a slow, broken or rejected icon
+   still leaves a legible chip instead of a hole in the row. */
+.tab-affinity-letter {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: grid;
+  place-items: center;
+  color: #8a93a3;
+  font-size: calc(8.5px * var(--ui-scale));
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+
+.tab-affinity-chip[data-tone="controlling"] {
+  box-shadow: 0 0 0 1px rgba(77, 107, 254, 0.55), 0 0 0 3px rgba(77, 107, 254, 0.1);
+}
+
+.tab-affinity-chip[data-tone="active"] {
+  box-shadow: 0 0 0 1px rgba(34, 160, 107, 0.55), 0 0 0 3px rgba(34, 160, 107, 0.1);
+}
+
+/* A closed page loses its colour and gets struck through: the chip is the only
+   surviving evidence of which page the assistant was bound to. */
+.tab-affinity-chip[data-tone="closed"] {
+  box-shadow: 0 0 0 1px rgba(23, 32, 51, 0.1);
+}
+
+.tab-affinity-chip[data-tone="closed"] img {
+  filter: grayscale(1) contrast(0.62) brightness(1.16);
+  opacity: 0.55;
+}
+
+.tab-affinity-chip[data-tone="closed"] .tab-affinity-letter {
+  color: #a3aab6;
+}
+
+.tab-affinity-chip[data-tone="closed"]::after {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: linear-gradient(135deg, transparent 44%, #b6bcc7 44%, #b6bcc7 56%, transparent 56%);
+  content: "";
+}
+
+/* --- tooltip ------------------------------------------------------------
+   The whole status sentence lives here. CSS-only on purpose: the panel runs
+   under an extension CSP, and a hover target must never depend on script.
+   ---------------------------------------------------------------------- */
+
+.tab-affinity-chip[data-tip]::before,
+.tab-affinity-chip[data-tip]::after {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: -4px;
+  z-index: 40;
+  opacity: 0;
+  transform: translateY(3px);
+  transition: opacity 110ms ease, transform 110ms ease;
+  pointer-events: none;
+}
+
+.tab-affinity-chip[data-tip]::before {
+  width: max-content;
+  max-width: min(268px, calc(100vw - 40px));
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: #172033;
+  color: #f2f5fb;
+  font-size: calc(10.5px * var(--ui-scale));
+  font-weight: 500;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 6px 18px rgba(16, 24, 40, 0.22);
+  content: attr(data-tip);
+}
+
+.tab-affinity-chip[data-tip]::after {
+  left: 4px;
+  border: 5px solid transparent;
+  border-top-color: #172033;
+  bottom: calc(100% + 1px);
+  content: "";
+}
+
+.tab-affinity-chip[data-tip]:hover::before,
+.tab-affinity-chip[data-tip]:hover::after,
+.tab-affinity-chip[data-tip]:focus-visible::before,
+.tab-affinity-chip[data-tip]:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* The right-hand chip sits too close to the panel edge for a left-anchored
+   bubble, so its tooltip grows leftwards instead of being clipped. */
+.tab-affinity-node:last-child .tab-affinity-chip[data-tip]::before {
+  right: -4px;
+  left: auto;
+}
+
+.tab-affinity-node:last-child .tab-affinity-chip[data-tip]::after {
+  right: 4px;
+  left: auto;
+}
+
+/* --- actions ------------------------------------------------------------ */
 
 .tab-affinity-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  row-gap: 6px;
-  margin-top: 10px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
 }
 
 .tab-affinity-actions button {
-  min-height: 28px;
-  flex: 1 1 0;
-  padding: 4px 8px;
-  white-space: nowrap;
-  border-radius: 8px;
+  min-height: 24px;
+  padding: 2px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  color: #475467;
   cursor: pointer;
   font-size: calc(10.5px * var(--ui-scale));
   font-weight: 680;
-  transition: border-color 150ms ease, background-color 150ms ease, transform 150ms ease;
+  white-space: nowrap;
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.tab-affinity-actions button:hover {
+  border-color: #b9c3d3;
+  background: #f2f4f8;
+  color: var(--ink);
 }
 
 .tab-affinity-actions button:active {
   transform: translateY(1px);
 }
 
-.tab-affinity-actions .keep {
-  border: 1px solid var(--line-strong);
-  background: var(--surface);
-  color: var(--ink);
-}
-
-.tab-affinity-actions .keep:hover {
-  border-color: #b6c0d0;
-  background: #f8fafc;
-}
-
 .tab-affinity-actions .follow {
-  border: 1px solid var(--blue);
+  border-color: transparent;
   background: var(--blue);
   color: #fff;
+  box-shadow: 0 1px 2px rgba(77, 107, 254, 0.28);
 }
 
 .tab-affinity-actions .follow:hover {
-  border-color: var(--blue-hover);
+  border-color: transparent;
   background: var(--blue-hover);
-}
-
-.tab-affinity.background .tab-affinity-actions {
-  margin-top: 7px;
-}
-
-.tab-affinity.background .tab-affinity-actions .follow {
-  min-height: 26px;
-  flex: 0 1 auto;
-  padding: 3px 2px;
-  border: 0;
-  background: transparent;
-  color: var(--blue-ink);
-}
-
-.tab-affinity.background .tab-affinity-actions .follow::after {
-  margin-left: 4px;
-  content: "→";
-}
-
-.tab-affinity.background .tab-affinity-actions .follow:hover {
-  background: transparent;
-  color: var(--blue-hover);
+  color: #fff;
 }
 
 .settings h1 {
@@ -965,7 +1034,7 @@ textarea:focus-visible {
 }
 
 /* A turn that failed or stopped early. Centered like .info, but it must read as
-   a warning rather than quiet metadata — the user needs to know why the answer
+   a warning rather than quiet metadata â€” the user needs to know why the answer
    never arrived. */
 .row-failure {
   max-width: 92%;
@@ -983,7 +1052,7 @@ textarea:focus-visible {
 
 /* The Host is blocked on an approval the panel cannot answer. Amber, not red:
    nothing is broken, the conversation is simply waiting on the user elsewhere.
-   No button — resolving it belongs to the web GUI. */
+   No button â€” resolving it belongs to the web GUI. */
 .row-approval-waiting {
   max-width: 92%;
   margin: 0;

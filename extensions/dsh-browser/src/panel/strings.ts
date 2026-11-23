@@ -1,4 +1,5 @@
 import type { BridgeState } from '../background/bridge.ts'
+import type { TabAffinityStatus } from '../background/tab-affinity.ts'
 import type { UiLocale } from '../i18n.ts'
 
 export interface PanelCopy {
@@ -38,18 +39,14 @@ export interface PanelCopy {
     you: string
     unknownTab: string
     closedTab: string
-    questionTitle: string
-    questionBody: (controlled: string, active: string) => string
     keep: string
     follow: string
-    /** Move the user's own tab back to the page the assistant is bound to. */
-    backgroundTitle: (controlled: string) => string
-    backgroundBody: (active: string) => string
-    pinnedBody: (active: string) => string
     followCurrent: string
-    lostTitle: string
-    lostBody: string
     useCurrent: string
+    /** Tooltip on the assistant's chip: which page it is bound to, and why. */
+    assistantTip: (title: string, status: TabAffinityStatus) => string
+    /** Tooltip on the user's chip: which page is on screen, and what it is not. */
+    youTip: (title: string, status: TabAffinityStatus) => string
   }
   question: {
     eyebrow: string
@@ -352,17 +349,28 @@ const EN: PanelCopy = {
     you: 'You',
     unknownTab: 'Untitled tab',
     closedTab: 'Closed tab',
-    questionTitle: 'Follow your current page?',
-    questionBody: (controlled, active) => `It is still bound to “${controlled}”, while you moved to “${active}”. Browser actions are paused until you choose.`,
     keep: 'Stay',
     follow: 'Follow',
-    backgroundTitle: () => 'Assistant stays on the original page',
-    backgroundBody: (active) => `You are viewing “${active}”. Future browser actions still run on the original page.`,
-    pinnedBody: (active) => `You are viewing “${active}”. Future browser actions still run on the original page, and switching tabs will not ask again.`,
-    followCurrent: 'Follow the current page',
-    lostTitle: 'The controlled tab was closed',
-    lostBody: 'Browser actions are paused to avoid operating the wrong page.',
-    useCurrent: 'Use current page',
+    followCurrent: 'Follow',
+    useCurrent: 'Use current',
+    assistantTip: (title, status) => {
+      if (status === 'lost') {
+        return `Assistant — the tab it was bound to has closed (“${title}”). Browser actions are paused so the wrong page is never operated.`
+      }
+      if (status === 'handoff') {
+        return `Assistant — still bound to “${title}”. Browser actions are paused until you choose Stay or Follow.`
+      }
+      return `Assistant — bound to “${title}”. Browser actions run on this page.`
+    },
+    youTip: (title, status) => {
+      if (status === 'lost') {
+        return `You — viewing “${title}”. Use this page to hand control to it.`
+      }
+      if (status === 'handoff') {
+        return `You — viewing “${title}”. Follow makes this page the target of browser actions.`
+      }
+      return `You — viewing “${title}”. Read-only here: browser actions stay on the assistant's page.`
+    },
   },
   question: {
     eyebrow: 'Waiting for your answer',
@@ -664,17 +672,28 @@ const ZH: PanelCopy = {
     you: '你',
     unknownTab: '未命名标签页',
     closedTab: '已关闭的标签页',
-    questionTitle: '助手要跟随当前页面吗？',
-    questionBody: (controlled, active) => `助手仍绑定“${controlled}”，你刚切到“${active}”。选择前，浏览器操作会暂停。`,
     keep: '留在原页',
-    follow: '跟随当前页',
-    backgroundTitle: () => '助手仍在原页面',
-    backgroundBody: (active) => `你正在查看“${active}”，后续浏览器操作仍会在原页面执行。`,
-    pinnedBody: (active) => `你正在查看“${active}”，后续浏览器操作仍会在原页面执行；切换标签页时不会再询问。`,
-    followCurrent: '改为跟随当前页面',
-    lostTitle: '受控标签页已关闭',
-    lostBody: '为避免操作错页，浏览器操作已暂停。',
-    useCurrent: '使用当前页面',
+    follow: '跟随',
+    followCurrent: '跟随',
+    useCurrent: '用当前页',
+    assistantTip: (title, status) => {
+      if (status === 'lost') {
+        return `助手——它绑定的标签页已关闭（“${title}”）。为避免操作错页，浏览器操作已暂停。`
+      }
+      if (status === 'handoff') {
+        return `助手——仍绑定“${title}”。选择“留在原页”或“跟随”前，浏览器操作会暂停。`
+      }
+      return `助手——绑定“${title}”。浏览器操作在这个页面上执行。`
+    },
+    youTip: (title, status) => {
+      if (status === 'lost') {
+        return `你——正在查看“${title}”。用这个页面把控制权交出去。`
+      }
+      if (status === 'handoff') {
+        return `你——正在查看“${title}”。“跟随”会让浏览器操作改为在这个页面上执行。`
+      }
+      return `你——正在查看“${title}”。仅浏览：浏览器操作仍在助手的页面上。`
+    },
   },
   question: {
     eyebrow: '等待你的回答',
