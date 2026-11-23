@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   appendLiveRow,
+  clearApprovalNotices,
   completeLastTool,
   mergeHistoryRows,
   pendingQuestionFromFrame,
@@ -72,6 +73,24 @@ describe('rowFromEvent', () => {
       expect(rowFromEvent(ev('turn/end', { turn: 3, reason }))).toBeNull()
     }
     expect(rowFromEvent(ev('turn/end', { turn: 3 }))).toBeNull()
+  })
+
+  it('reports a Host approval as a read-only notice naming the tool', () => {
+    const row = rowFromEvent(ev('approval/asked', { id: 'a1', toolName: 'Bash', approvalReason: 'writes outside the workspace' }))
+    expect(row).toMatchObject({ kind: 'info', awaitingApproval: true })
+    expect(row?.text).toContain('Bash')
+    expect(row?.text).toContain('writes outside the workspace')
+    // Read-only: the row carries no decision affordance.
+    expect(row).not.toHaveProperty('failed')
+  })
+
+  it('reports an approval that names no tool', () => {
+    const row = rowFromEvent(ev('approval/asked', { id: 'a2' }))
+    expect(row).toMatchObject({ kind: 'info', awaitingApproval: true })
+  })
+
+  it('never renders approval/decided as a row', () => {
+    expect(rowFromEvent(ev('approval/decided', { id: 'a1', outcome: 'allowed-once' }))).toBeNull()
   })
 
   it('renders image-only and mixed multimodal messages from durable attachment refs', () => {
@@ -149,6 +168,22 @@ describe('appendLiveRow / completeLastTool', () => {
   it('carries the failed marker onto the appended row', () => {
     const rows = appendLiveRow([], { seq: 0, kind: 'info', text: 'This turn failed', failed: true }, 1)
     expect(rows[0]).toMatchObject({ kind: 'info', failed: true, seq: 1 })
+  })
+
+  it('keeps one live approval notice instead of stacking them', () => {
+    let rows = appendLiveRow([], { seq: 0, kind: 'info', text: 'Waiting A', awaitingApproval: true }, 1)
+    rows = appendLiveRow(rows, { seq: 0, kind: 'info', text: 'Waiting B', awaitingApproval: true }, 2)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.text).toBe('Waiting B')
+  })
+
+  it('drops the approval notice once the Host records a decision', () => {
+    let rows = appendLiveRow([], { seq: 0, kind: 'user', text: '帮我跑一下' }, 1)
+    rows = appendLiveRow(rows, { seq: 0, kind: 'info', text: 'Waiting', awaitingApproval: true }, 2)
+    expect(clearApprovalNotices(rows).map((r) => r.kind)).toEqual(['user'])
+    // Idempotent when nothing is pending.
+    const settled = clearApprovalNotices(rows.filter(r => r.awaitingApproval !== true))
+    expect(settled.map((r) => r.kind)).toEqual(['user'])
   })
 })
 

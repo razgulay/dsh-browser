@@ -110,6 +110,7 @@ import {
 /** One rendered conversation row. */
 import {
   appendLiveRow,
+  clearApprovalNotices,
   completeLastTool,
   mergeHistoryRows,
   pendingQuestionFromFrame,
@@ -1295,6 +1296,10 @@ export function App(): React.JSX.Element {
       return
     }
     if (payload.sessionId !== sessionRef.current) return
+    if (payload.event.type === 'approval/decided') {
+      setRows((prev) => clearApprovalNotices(prev))
+      return
+    }
     const row = rowFromEvent(payload.event)
     if (row !== null) {
       setRows((prev) => appendLiveRow(prev, row, nextSeq()))
@@ -2964,7 +2969,9 @@ export function App(): React.JSX.Element {
               ? <ToolActivity row={row} copy={copy} />
               : row.failed === true
                 ? <p className="row-failure" role="status">{row.text}</p>
-                : <MessageBody row={row} sessionId={sessionRef.current ?? ''} api={api} copy={copy} />}
+                : row.awaitingApproval === true
+                  ? <p className="row-approval-waiting" role="status">{row.text}</p>
+                  : <MessageBody row={row} sessionId={sessionRef.current ?? ''} api={api} copy={copy} />}
           </div>
         ))}
         {streamRow !== null && (

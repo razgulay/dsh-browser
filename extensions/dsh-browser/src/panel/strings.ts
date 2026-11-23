@@ -213,6 +213,8 @@ export interface PanelCopy {
     turnFailed: string
     /** A turn stopped before finishing for a reason other than an error. */
     turnInterrupted: string
+    /** Prefix for a Host approval notice; the tool name and reason are appended. */
+    approvalWaiting: string
     connectedPlaceholder: string
     disconnectedPlaceholder: string
     composerHelp: string
@@ -522,6 +524,7 @@ const EN: PanelCopy = {
     thinking: 'Thinking',
     turnFailed: 'This turn failed',
     turnInterrupted: 'Stopped before finishing',
+    approvalWaiting: 'Waiting for approval in the web GUI',
     connectedPlaceholder: 'Tell me what you want to do on this page…',
     disconnectedPlaceholder: 'Connect to dsh to get started',
     composerHelp: 'Enter to send · Shift + Enter for a new line',
@@ -833,6 +836,7 @@ const ZH: PanelCopy = {
     thinking: '正在思考',
     turnFailed: '本轮执行失败',
     turnInterrupted: '未完成即中止',
+    approvalWaiting: '等待在 Web 界面中批准',
     connectedPlaceholder: '告诉我想在这个页面做什么…',
     disconnectedPlaceholder: '连接 dsh 后即可开始',
     composerHelp: 'Enter 发送 · Shift + Enter 换行',

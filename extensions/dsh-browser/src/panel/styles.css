@@ -981,6 +981,23 @@ textarea:focus-visible {
   overflow-wrap: anywhere;
 }
 
+/* The Host is blocked on an approval the panel cannot answer. Amber, not red:
+   nothing is broken, the conversation is simply waiting on the user elsewhere.
+   No button — resolving it belongs to the web GUI. */
+.row-approval-waiting {
+  max-width: 92%;
+  margin: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--warning);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  color: var(--warning);
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.5;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
 /* Markdown content is deliberately open for assistant responses, while user
    messages inherit their compact command-card container. */
 .row .body.md > :first-child {

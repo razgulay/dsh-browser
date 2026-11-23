@@ -20,6 +20,14 @@ export interface Row {
   status?: 'running' | 'complete'
   /** Set on `info` rows produced by a failed turn; rendered as an error line. */
   failed?: boolean
+  /**
+   * Set on `info` rows produced by `approval/asked`: the panel only reports that
+   * a decision is waiting in the web GUI. It never resolves one — approving a
+   * Host-side command from the browser would give the extension authority over
+   * process and filesystem decisions, which is exactly the trust boundary the
+   * bridge keeps closed.
+   */
+  awaitingApproval?: boolean
 }
 
 /** Minimal view of a SessionEvent (payload in `data`). */
@@ -38,6 +46,9 @@ export interface SessionEventView {
     title?: unknown
     /** `turn/end` payload: why the turn closed. */
     reason?: TurnEndReason
+    /** `approval/asked` payload: which tool awaits a decision, and why. */
+    toolName?: string
+    approvalReason?: string
   }
 }
 
@@ -199,6 +210,27 @@ export function rowFromEvent(event: SessionEventView): Row | null {
         failed: true,
       }
     }
+    case 'approval/asked': {
+      // Read-only notice. The bridge forwards every session event, so this row
+      // needs no bridge or protocol change; it only reports that the Host is
+      // blocked on a decision the panel deliberately cannot make.
+      const toolName = event.data?.toolName
+      const detail = event.data?.approvalReason
+      const label = PANEL_COPY[getUiLocale()].app
+      const target = toolName === undefined || toolName === '' ? '' : ` — ${toolName}`
+      const suffix = detail === undefined || detail === '' ? '' : ` (${detail})`
+      return {
+        seq: 0,
+        kind: 'info',
+        text: `${label.approvalWaiting}${target}${suffix}`,
+        awaitingApproval: true,
+      }
+    }
+    case 'approval/decided': {
+      // Resolution arrives as its own event; the waiting line is cleared by the
+      // live handler, and history never renders either one.
+      return null
+    }
     default:
       return null
   }
@@ -227,7 +259,20 @@ export function appendLiveRow(rows: Row[], row: Row, seq: number): Row[] {
     }
     return [...rows, { seq, kind: 'tool', text: row.text, status: 'running' }]
   }
-  return [...rows, { ...row, seq }]
+  // An approval notice is a live state, not history: keeping it once the user
+  // decided would leave a stale "waiting" line behind forever.
+  const kept = row.awaitingApproval === true ? rows.filter(entry => entry.awaitingApproval !== true) : rows
+  return [...kept, { ...row, seq }]
+}
+
+/**
+ * Drop any pending approval notice after `approval/decided`.
+ * @param rows - current rows.
+ * @returns rows without the approval notice.
+ */
+export function clearApprovalNotices(rows: Row[]): Row[] {
+  const next = rows.filter(entry => entry.awaitingApproval !== true)
+  return next.length === rows.length ? rows : next
 }
 
 /** 标记最后一行工具调用已完成（并入，不新增行）。 */
