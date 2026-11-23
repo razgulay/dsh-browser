@@ -32,12 +32,12 @@ import {
   type TranscriptQuote,
 } from './transcript-quote.ts'
 
-/** A pending quote plus the viewport rect of the highlight it came from. */
+/** A pending quote plus its position in the transcript's scroll space. */
 interface QuoteOffer {
   quote: TranscriptQuote
+  /** Offset from the transcript's padding box, already including scroll. */
   top: number
   left: number
-  width: number
 }
 import { normalizeFaviconUrl } from '../security/favicon.ts'
 import {
@@ -1313,7 +1313,17 @@ export function App(): React.JSX.Element {
       // Anchor the button above the last line of the highlight, so it never
       // covers the text the reader just chose.
       const bounds = selectionObject.getRangeAt(selectionObject.rangeCount - 1).getBoundingClientRect()
-      setQuoteOffer({ quote, top: bounds.top, left: bounds.left, width: bounds.width })
+      // `fixed` coordinates are viewport-relative, but the transcript is the
+      // scroll container: storing viewport numbers would leave the button
+      // pinned to the screen while the text scrolls away underneath. Convert to
+      // the transcript's own coordinate space instead, which is what an
+      // absolutely positioned child of `.messages` consumes.
+      const frame = root.getBoundingClientRect()
+      setQuoteOffer({
+        quote,
+        top: bounds.top - frame.top + root.scrollTop,
+        left: bounds.left - frame.left + root.scrollLeft,
+      })
     }
     document.addEventListener('mouseup', capture)
     document.addEventListener('keyup', capture)
@@ -3193,6 +3203,32 @@ export function App(): React.JSX.Element {
         scrollRef.current = element
         messagesRef.current = element
       }} onScroll={syncScrollBottom}>
+        {transcriptQuote === null && quoteOffer !== null && (
+          <button
+            type="button"
+            className="quote-offer"
+            // Absolutely positioned *inside* the transcript, using coordinates
+            // already converted into the transcript's scroll space: the button
+            // then travels with the text it belongs to instead of staying
+            // pinned to the viewport while the passage scrolls away.
+            style={{
+              top: `${Math.max(4, quoteOffer.top - 32)}px`,
+              left: `${Math.max(4, quoteOffer.left)}px`,
+            }}
+            // A press here must not clear the very selection it acts on.
+            onMouseDown={(event) => { event.preventDefault() }}
+            onClick={() => {
+              setTranscriptQuote(quoteOffer.quote)
+              setQuoteOffer(null)
+              // Drop the highlight: the passage now lives in the composer, and
+              // leaving it selected would make the next drag look like a requote.
+              window.getSelection()?.removeAllRanges()
+            }}
+          >
+            <QuoteIcon />
+            <span>{copy.app.quoteSelection}</span>
+          </button>
+        )}
         {rows.length === 0 && streamRow === null && !working && (<>
           <div className="star-banner">
             <span>{copy.app.starBanner}</span>
@@ -3258,31 +3294,6 @@ export function App(): React.JSX.Element {
       )}
       {error !== null && <div className="error">{error}</div>}
       {notice !== null && <div className="notice">{notice}</div>}
-      {transcriptQuote === null && quoteOffer !== null && (
-        <button
-          type="button"
-          className="quote-offer"
-          // Positioned against the highlight, not against a container: the
-          // button has to appear where the reader is looking, and the rect is
-          // viewport-relative, which is what `position: fixed` consumes.
-          style={{
-            top: `${Math.max(8, quoteOffer.top - 34)}px`,
-            left: `${Math.min(Math.max(8, quoteOffer.left), quoteOffer.left + quoteOffer.width)}px`,
-          }}
-          // A press here must not clear the very selection it acts on.
-          onMouseDown={(event) => { event.preventDefault() }}
-          onClick={() => {
-            setTranscriptQuote(quoteOffer.quote)
-            setQuoteOffer(null)
-            // Drop the highlight: the passage now lives in the composer, and
-            // leaving it selected would make the next drag look like a requote.
-            window.getSelection()?.removeAllRanges()
-          }}
-        >
-          <QuoteIcon />
-          <span>{copy.app.quoteSelection}</span>
-        </button>
-      )}
       <TabAffinityBanner
         state={tabAffinity}
         copy={copy}

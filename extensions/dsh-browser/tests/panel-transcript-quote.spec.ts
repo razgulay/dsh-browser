@@ -195,7 +195,9 @@ describe('quoting the conversation', () => {
     expect(offer()!.textContent).toContain('Quote text')
     // The button belongs to the highlight, not to the composer: it floats.
     expect(offer()!.closest('.composer-box')).toBeNull()
-    expect(offer()!.style.position === '' || getComputedStyle(offer()!).position === 'fixed').toBe(true)
+    // And it lives inside the scroller, so it travels with the text rather
+    // than staying pinned to the viewport while the passage scrolls away.
+    expect(offer()!.parentElement?.classList.contains('messages')).toBe(true)
   })
 
   it('positions the offer at the highlight it acts on', async () => {
@@ -203,9 +205,30 @@ describe('quoting the conversation', () => {
     await highlightInTranscript(QUOTED)
 
     await vi.waitFor(() => { expect(offer()).not.toBeNull() })
-    // Above the first line of the highlight, never covering it.
-    expect(offer()!.style.top).toBe('366px')
+    // jsdom reports a zero-origin frame and no scroll, so the transcript-space
+    // offset equals the range top; the button sits one line above it.
+    expect(offer()!.style.top).toBe('368px')
     expect(offer()!.style.left).toBe('120px')
+  })
+
+  it('converts the highlight rect into transcript space, so scrolling keeps them together', async () => {
+    await renderConnected()
+
+    const transcript = document.querySelector<HTMLElement>('.messages')!
+    // Pretend the transcript starts 100px down the viewport and is scrolled 500px.
+    Object.defineProperty(transcript, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ top: 100, left: 10, width: 360, height: 600, right: 370, bottom: 700, x: 10, y: 100 }),
+    })
+    Object.defineProperty(transcript, 'scrollTop', { configurable: true, get: () => 500, set: () => {} })
+
+    await highlightInTranscript(QUOTED)
+
+    await vi.waitFor(() => { expect(offer()).not.toBeNull() })
+    // 400 - 100 + 500 = 800 in transcript space, minus the 32px offset.
+    expect(offer()!.style.top).toBe('768px')
+    // 120 - 10 = 110.
+    expect(offer()!.style.left).toBe('110px')
   })
 
   it('ignores a highlight outside the transcript', async () => {
