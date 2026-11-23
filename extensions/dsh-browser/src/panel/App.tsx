@@ -31,6 +31,14 @@ import {
   transcriptQuotePromptText,
   type TranscriptQuote,
 } from './transcript-quote.ts'
+
+/** A pending quote plus the viewport rect of the highlight it came from. */
+interface QuoteOffer {
+  quote: TranscriptQuote
+  top: number
+  left: number
+  width: number
+}
 import { normalizeFaviconUrl } from '../security/favicon.ts'
 import {
   applyUiScale,
@@ -849,7 +857,7 @@ export function App(): React.JSX.Element {
    */
   const [transcriptQuote, setTranscriptQuote] = useState<TranscriptQuote | null>(null)
   /** A finished transcript highlight waiting to be quoted, if any. */
-  const [quoteOffer, setQuoteOffer] = useState<TranscriptQuote | null>(null)
+  const [quoteOffer, setQuoteOffer] = useState<QuoteOffer | null>(null)
   const [imageLimits, setImageLimits] = useState<ImageAttachmentLimits | null>(null)
   const [addingImages, setAddingImages] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -1269,14 +1277,17 @@ export function App(): React.JSX.Element {
    * Turn a highlight inside the transcript into a quote attachment.
    *
    * Scoped to the message list on purpose: the composer, settings and the
-   * approval dialog all have selectable text too, and turning those highlight
+   * approval dialog all have selectable text too, and turning those highlights
    * into quotes would be surprising. Only `mouseup`/`keyup` are used — reading
-   * during `selectionchange` would attach half-finished drags.
+   * during `selectionchange` would offer a quote for half-finished drags.
    *
-   * Deliberately *not* automatic on selection alone: the user must reach the
-   * composer (an explicit act), matching the page-quote behaviour where the
-   * chip appears only from the panel's own capture flow. Here the trigger is
-   * the "Quote" affordance below, so a stray drag never rewrites the draft.
+   * The button floats at the highlight rather than living in the composer: it
+   * is an action on that passage, so it has to appear where the reader is
+   * looking. It carries the viewport rect captured at selection time, which is
+   * also what `position: fixed` consumes.
+   *
+   * Nothing is attached until the button is pressed, so a stray drag never
+   * rewrites the draft.
    */
   useEffect(() => {
     if (showSettings) return
@@ -1295,7 +1306,14 @@ export function App(): React.JSX.Element {
         return
       }
       const quote = normalizeTranscriptQuote(selectionObject.toString())
-      setQuoteOffer(quote ?? null)
+      if (quote === undefined || selectionObject.rangeCount === 0) {
+        setQuoteOffer(null)
+        return
+      }
+      // Anchor the button above the last line of the highlight, so it never
+      // covers the text the reader just chose.
+      const bounds = selectionObject.getRangeAt(selectionObject.rangeCount - 1).getBoundingClientRect()
+      setQuoteOffer({ quote, top: bounds.top, left: bounds.left, width: bounds.width })
     }
     document.addEventListener('mouseup', capture)
     document.addEventListener('keyup', capture)
@@ -3240,6 +3258,31 @@ export function App(): React.JSX.Element {
       )}
       {error !== null && <div className="error">{error}</div>}
       {notice !== null && <div className="notice">{notice}</div>}
+      {transcriptQuote === null && quoteOffer !== null && (
+        <button
+          type="button"
+          className="quote-offer"
+          // Positioned against the highlight, not against a container: the
+          // button has to appear where the reader is looking, and the rect is
+          // viewport-relative, which is what `position: fixed` consumes.
+          style={{
+            top: `${Math.max(8, quoteOffer.top - 34)}px`,
+            left: `${Math.min(Math.max(8, quoteOffer.left), quoteOffer.left + quoteOffer.width)}px`,
+          }}
+          // A press here must not clear the very selection it acts on.
+          onMouseDown={(event) => { event.preventDefault() }}
+          onClick={() => {
+            setTranscriptQuote(quoteOffer.quote)
+            setQuoteOffer(null)
+            // Drop the highlight: the passage now lives in the composer, and
+            // leaving it selected would make the next drag look like a requote.
+            window.getSelection()?.removeAllRanges()
+          }}
+        >
+          <QuoteIcon />
+          <span>{copy.app.quoteSelection}</span>
+        </button>
+      )}
       <TabAffinityBanner
         state={tabAffinity}
         copy={copy}
@@ -3336,22 +3379,6 @@ export function App(): React.JSX.Element {
                 </span>
               </div>
             </div>
-          )}
-          {transcriptQuote === null && quoteOffer !== null && (
-            <button
-              type="button"
-              className="quote-offer"
-              onClick={() => {
-                setTranscriptQuote(quoteOffer)
-                setQuoteOffer(null)
-                // Drop the highlight: it now lives in the composer, and leaving
-                // it selected would make a second click look like a new quote.
-                window.getSelection()?.removeAllRanges()
-              }}
-            >
-              <QuoteIcon />
-              <span>{copy.app.quoteSelection}</span>
-            </button>
           )}
           {draftImages.length > 0 && (
             <div className="draft-images" aria-label={copy.app.addImages}>
