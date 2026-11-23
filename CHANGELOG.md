@@ -3,7 +3,7 @@
 **English** | [中文](CHANGELOG.zh-CN.md)
 
 ## latest
-* 2026-11-23 [Feature] Selecting text in the conversation offers "Quote text" right at the highlight, which attaches that passage to your next message as attributed, fenced quoted text rather than plain typed words; the offer travels with the text when the conversation scrolls.
+* 2026-11-23 [Feature] Selecting text in the conversation offers "Quote text" right at the highlight, which attaches that passage to your next message as attributed, fenced quoted text rather than plain typed words; the offer travels with the text when the conversation scrolls, and disappears as soon as you click away.
 * 2026-11-23 [Fix] Sending a message after scrolling up brings the new turn into view, instead of leaving the answer below the fold.
 * 2026-11-23 [Fix] Returning from settings puts the conversation back where you left it, instead of jumping to the top of the transcript.
 * 2026-11-23 [Fix] The session list behaves like an overlay: it covers the conversation instead of pushing it down, and closes when you click elsewhere in the panel or press Escape.

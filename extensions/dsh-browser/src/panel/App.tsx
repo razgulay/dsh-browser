@@ -1293,21 +1293,24 @@ export function App(): React.JSX.Element {
     if (showSettings) return
     const root = messagesRef.current
     if (root === null) return
+
+    const clear = (): void => { setQuoteOffer(null) }
+
     const capture = (): void => {
       const selectionObject = window.getSelection()
       if (selectionObject === null || selectionObject.isCollapsed) {
-        setQuoteOffer(null)
+        clear()
         return
       }
       // Only a highlight that starts inside the transcript qualifies.
       const anchor = selectionObject.anchorNode
       if (anchor === null || !root.contains(anchor)) {
-        setQuoteOffer(null)
+        clear()
         return
       }
       const quote = normalizeTranscriptQuote(selectionObject.toString())
       if (quote === undefined || selectionObject.rangeCount === 0) {
-        setQuoteOffer(null)
+        clear()
         return
       }
       // Anchor the button above the last line of the highlight, so it never
@@ -1325,11 +1328,39 @@ export function App(): React.JSX.Element {
         left: bounds.left - frame.left + root.scrollLeft,
       })
     }
+
+    /**
+     * Dismissal must not depend on the selection having collapsed.
+     *
+     * Chrome does not always clear a document selection on a click outside it —
+     * clicking a non-editable area, or landing in a shadow boundary, can leave
+     * the range intact. Reading the selection after such a click therefore
+     * reports a live highlight and the offer stays on screen, which is exactly
+     * the "sometimes it lingers" behaviour. A press anywhere that is not the
+     * offer itself is treated as dismissal on its own, and `selectionchange`
+     * covers the keyboard and programmatic cases.
+     */
+    const dismissUnlessOnOffer = (event: Event): void => {
+      const target = event.target
+      if (target instanceof Element && target.closest('.quote-offer') !== null) return
+      // A press that begins a new drag will re-offer on the matching mouseup.
+      clear()
+    }
+
+    const onSelectionChange = (): void => {
+      const selectionObject = window.getSelection()
+      if (selectionObject === null || selectionObject.isCollapsed) clear()
+    }
+
     document.addEventListener('mouseup', capture)
     document.addEventListener('keyup', capture)
+    document.addEventListener('pointerdown', dismissUnlessOnOffer, true)
+    document.addEventListener('selectionchange', onSelectionChange)
     return () => {
       document.removeEventListener('mouseup', capture)
       document.removeEventListener('keyup', capture)
+      document.removeEventListener('pointerdown', dismissUnlessOnOffer, true)
+      document.removeEventListener('selectionchange', onSelectionChange)
     }
   }, [showSettings])
 
