@@ -2244,6 +2244,12 @@ export function App(): React.JSX.Element {
     setBusy(true)
     setWorking(true)
     setError(null)
+    // Sending is an explicit "I am done reading the old rows" act: re-arm the
+    // follow-bottom latch so the new turn scrolls into view. Without this, a
+    // reader who had scrolled up stayed parked wherever they were while the
+    // answer streamed in below the fold — the latch was only ever set by the
+    // scroll-to-bottom button, session switches and history loads.
+    stickConversationToBottom()
     // 不渲染乐观行：live user/message 事件即时回显，避免同一消息出现两行。
     try {
       const clientTimeZone = browserTimeZone()

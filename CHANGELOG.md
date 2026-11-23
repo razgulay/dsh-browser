@@ -3,6 +3,7 @@
 **English** | [中文](CHANGELOG.zh-CN.md)
 
 ## latest
+* 2026-11-23 [Fix] Sending a message after scrolling up brings the new turn into view, instead of leaving the answer below the fold.
 * 2026-11-23 [Fix] Returning from settings puts the conversation back where you left it, instead of jumping to the top of the transcript.
 * 2026-11-23 [Fix] The session list behaves like an overlay: it covers the conversation instead of pushing it down, and closes when you click elsewhere in the panel or press Escape.
 * 2026-11-23 [Feature] The page-handoff prompt is now a single row above the composer instead of a card that filled a large part of the panel: each page shows its own site icon, and the full titles plus what each choice will do appear on hover or keyboard focus.
