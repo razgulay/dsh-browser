@@ -245,6 +245,50 @@ describe('quoting the conversation', () => {
     expect(offer()).toBeNull()
   })
 
+  it('dismisses the offer on a press elsewhere even when the selection survives', async () => {
+    await renderConnected()
+    await highlightInTranscript(QUOTED)
+    await vi.waitFor(() => { expect(offer()).not.toBeNull() })
+
+    // Chrome does not always collapse a document selection when the click lands
+    // on a non-editable area. Leave the range intact and press elsewhere: the
+    // offer must go anyway. This is the "sometimes it lingers" report.
+    await act(async () => {
+      document.querySelector('.composer-box')!.dispatchEvent(
+        new MouseEvent('pointerdown', { bubbles: true, cancelable: true }),
+      )
+    })
+
+    await vi.waitFor(() => { expect(offer()).toBeNull() })
+  })
+
+  it('keeps the offer when the press is on the offer itself', async () => {
+    await renderConnected()
+    await highlightInTranscript(QUOTED)
+    await vi.waitFor(() => { expect(offer()).not.toBeNull() })
+
+    await act(async () => {
+      offer()!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }))
+    })
+
+    // The click that follows must still find its button.
+    await act(async () => { await Promise.resolve() })
+    expect(offer()).not.toBeNull()
+  })
+
+  it('dismisses the offer when the selection collapses', async () => {
+    await renderConnected()
+    await highlightInTranscript(QUOTED)
+    await vi.waitFor(() => { expect(offer()).not.toBeNull() })
+
+    await act(async () => {
+      window.getSelection()?.removeAllRanges()
+      document.dispatchEvent(new Event('selectionchange'))
+    })
+
+    await vi.waitFor(() => { expect(offer()).toBeNull() })
+  })
+
   it('attaches the quote to the composer, then removes it', async () => {
     await renderConnected()
     await highlightInTranscript(QUOTED)
