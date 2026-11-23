@@ -25,6 +25,12 @@ const QUOTED = 'Bug tiep, khi toi keo len tren'
 function selectInside(element: Element, text: string): void {
   const range = document.createRange()
   range.selectNodeContents(element)
+  // jsdom has no layout engine and Range has no rect at all, so the panel's
+  // anchoring read would throw. Give every highlight a plausible box.
+  Object.defineProperty(range, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => ({ top: 400, left: 120, width: 200, height: 20, right: 320, bottom: 420, x: 120, y: 400 }),
+  })
   const selection = window.getSelection()!
   selection.removeAllRanges()
   selection.addRange(range)
@@ -187,6 +193,19 @@ describe('quoting the conversation', () => {
 
     await vi.waitFor(() => { expect(offer()).not.toBeNull() })
     expect(offer()!.textContent).toContain('Quote text')
+    // The button belongs to the highlight, not to the composer: it floats.
+    expect(offer()!.closest('.composer-box')).toBeNull()
+    expect(offer()!.style.position === '' || getComputedStyle(offer()!).position === 'fixed').toBe(true)
+  })
+
+  it('positions the offer at the highlight it acts on', async () => {
+    await renderConnected()
+    await highlightInTranscript(QUOTED)
+
+    await vi.waitFor(() => { expect(offer()).not.toBeNull() })
+    // Above the first line of the highlight, never covering it.
+    expect(offer()!.style.top).toBe('366px')
+    expect(offer()!.style.left).toBe('120px')
   })
 
   it('ignores a highlight outside the transcript', async () => {

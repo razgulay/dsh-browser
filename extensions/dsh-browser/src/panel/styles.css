@@ -1559,15 +1559,17 @@ textarea:focus-visible {
   border-left-color: #c9d2e2;
 }
 
-/* The offer appears only while a highlight exists inside the transcript, so it
-   reads as an action on that highlight rather than a permanent composer button. */
+/* The offer floats at the highlight it acts on: it appears while a passage is
+   selected inside the transcript, and disappears with the selection. Fixed
+   positioning plus the rect captured at selection time keeps it beside the text
+   even while the transcript scrolls behind it. */
 .quote-offer {
+  position: fixed;
+  z-index: 60;
   display: inline-flex;
   align-items: center;
-  align-self: flex-start;
   gap: 5px;
-  margin: 8px 12px 0;
-  padding: 3px 9px;
+  padding: 4px 10px;
   border: 1px solid var(--line-strong);
   border-radius: 999px;
   background: var(--surface);
@@ -1575,6 +1577,9 @@ textarea:focus-visible {
   cursor: pointer;
   font-size: calc(10.5px * var(--ui-scale));
   font-weight: 660;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(23, 32, 51, 0.16);
+  animation: pop-in 0.1s ease-out;
 }
 
 .quote-offer:hover {
