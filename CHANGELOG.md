@@ -3,7 +3,7 @@
 **English** | [中文](CHANGELOG.zh-CN.md)
 
 ## latest
-* 2026-11-23 [Fix] The session list now closes when you click elsewhere in the panel or press Escape, instead of staying open until its own header button is clicked again.
+* 2026-11-23 [Fix] The session list behaves like an overlay: it covers the conversation instead of pushing it down, and closes when you click elsewhere in the panel or press Escape.
 * 2026-11-23 [Feature] The page-handoff prompt is now a single row above the composer instead of a card that filled a large part of the panel: each page shows its own site icon, and the full titles plus what each choice will do appear on hover or keyboard focus.
 * 2026-10-25 [Fix] Works with dsh 0.2.1-rc.3: the plugin loads and runs unchanged on the new release, and dsh 0.2.1-rc.2 hosts remain supported.
 ## v0.1.8

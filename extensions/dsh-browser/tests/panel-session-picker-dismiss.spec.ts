@@ -1,4 +1,4 @@
-﻿// @vitest-environment jsdom
+// @vitest-environment jsdom
 
 /**
  * The session picker is a sibling overlay over the transcript, not a modal.
@@ -129,6 +129,28 @@ describe('session picker dismissal', () => {
       target.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }))
     })
   }
+
+  /**
+   * Opening the list must not reflow the transcript.
+   *
+   * It used to be a flex child of `.app`, so it consumed real height and shoved
+   * the conversation down instead of floating over it. jsdom has no layout
+   * engine, so this asserts the two facts that produce the overlay: the list is
+   * nested in the relatively-positioned pane, and it is taken out of flow.
+   */
+  it('overlays the transcript instead of pushing it down', async () => {
+    await renderConnected()
+    const pane = document.querySelector('.messages-pane')
+    expect(pane).not.toBeNull()
+
+    await openPicker()
+
+    const section = picker()!
+    // Nesting is what lets `position: absolute` anchor to the pane.
+    expect(pane!.contains(section)).toBe(true)
+    // And the picker must not be a sibling flex row of the composer.
+    expect(section.parentElement).toBe(pane)
+  })
 
   it('closes when the user clicks outside it', async () => {
     await renderConnected()
