@@ -913,6 +913,8 @@ export function App(): React.JSX.Element {
   const sessionRef = useRef<string | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const atBottomRef = useRef(true)
+  /** Transcript offset captured before the settings view replaces it. */
+  const savedScrollRef = useRef<number | null>(null)
   const [atBottom, setAtBottom] = useState(true)
 
   const nextSeq = (): number => { seqRef.current += 1; return seqRef.current }
@@ -936,6 +938,47 @@ export function App(): React.JSX.Element {
     stickConversationToBottom()
     element.scrollTo({ top: element.scrollHeight, behavior })
   }
+
+  /**
+   * Leave the conversation for the settings view.
+   *
+   * Settings replace the whole panel, so the transcript unmounts and its
+   * scroll offset dies with the element. Capturing the offset first is the
+   * only way to come back to where the user was; MB3 has no browser-level
+   * scroll restoration for a subtree that is removed and re-created.
+   */
+  function openSettings(): void {
+    const element = scrollRef.current
+    savedScrollRef.current = element === null ? null : element.scrollTop
+    setShowModelPicker(false)
+    setShowSettings(true)
+  }
+
+  /**
+   * Put the transcript back where the user left it.
+   *
+   * Content can grow while settings are open (a running turn keeps streaming),
+   * so the saved offset is clamped to the new scroll height rather than trusted
+   * blindly. Following the bottom is preserved as its own case: a user who was
+   * pinned to the newest row should still be pinned after coming back.
+   */
+  useLayoutEffect(() => {
+    if (showSettings) return
+    const element = scrollRef.current
+    if (element === null) return
+    const saved = savedScrollRef.current
+    if (saved === null) return
+    savedScrollRef.current = null
+    if (atBottomRef.current) {
+      element.scrollTo({ top: element.scrollHeight, behavior: 'instant' })
+      return
+    }
+    const max = Math.max(0, element.scrollHeight - element.clientHeight)
+    element.scrollTo({ top: Math.min(saved, max), behavior: 'instant' })
+    syncScrollBottom()
+    // Depends on the view only: this must run on the return, not on every row.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSettings])
   const question = questions[0] ?? null
   const questionSubmitting = question !== null && hasPendingQuestion(questionSubmissions, question)
   const sessionSwitchBlocked = sessionChanging || busy || addingImages || stopping
@@ -3014,10 +3057,7 @@ export function App(): React.JSX.Element {
             aria-label={copy.app.newSession} title={copy.app.newSession}>
             <PlusIcon />
           </button>
-          <button className="icon-button settings-trigger" onClick={() => {
-            setShowModelPicker(false)
-            setShowSettings(true)
-          }}
+          <button className="icon-button settings-trigger" onClick={openSettings}
             aria-label={copy.app.openSettings} title={copy.app.settings}><SettingsIcon /></button>
         </div>
       </header>
