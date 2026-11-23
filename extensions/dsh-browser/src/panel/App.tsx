@@ -3021,6 +3021,7 @@ export function App(): React.JSX.Element {
             aria-label={copy.app.openSettings} title={copy.app.settings}><SettingsIcon /></button>
         </div>
       </header>
+      <div className="messages-pane">
       {showSessionPicker && (
         <section className="session-picker" aria-label={copy.app.sessions} ref={sessionPickerRef}>
           <div className="session-picker-head">
@@ -3063,7 +3064,6 @@ export function App(): React.JSX.Element {
               )}
         </section>
       )}
-      <div className="messages-pane">
       <div className="messages" ref={scrollRef} onScroll={syncScrollBottom}>
         {rows.length === 0 && streamRow === null && !working && (<>
           <div className="star-banner">

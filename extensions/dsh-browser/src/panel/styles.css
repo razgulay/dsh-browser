@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   color-scheme: light;
   /* Panel-wide text scale. The side panel has no browser zoom control, so the
      topbar "Aa" button writes this token and every font-size is a multiple of
@@ -3176,9 +3176,20 @@ textarea:focus-visible {
 }
 
 /* Session history picker */
+/* The session list is an overlay, not a row.
+   As a flex child it consumed real height and pushed the transcript down, so
+   opening it looked like the conversation was shoved away instead of the list
+   appearing over it. Absolute positioning against `.messages-pane` leaves the
+   scroll position and the panel geometry untouched. */
 .session-picker {
-  flex: 0 0 auto;
-  max-height: 260px;
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  right: 12px;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  max-height: min(320px, calc(100% - 16px));
   overflow-y: auto;
   margin: 0;
   padding: 10px 12px;
@@ -3187,6 +3198,7 @@ textarea:focus-visible {
   border-radius: 12px;
   box-shadow: var(--shadow-pop);
   animation: pop-in 0.12s ease-out;
+  overscroll-behavior: contain;
 }
 
 .session-picker-head {
