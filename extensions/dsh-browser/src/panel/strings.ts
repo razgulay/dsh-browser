@@ -245,6 +245,11 @@ export interface PanelCopy {
     selectionAttached: string
     selectionTruncated: string
     removeSelection: string
+    /** Offer shown when a highlight inside the conversation can be quoted. */
+    quoteSelection: string
+    /** Chip label once a conversation highlight is attached to the draft. */
+    transcriptQuoteChip: string
+    removeTranscriptQuote: string
     scrollToBottom: string
     permissionControl: string
     permissionMenu: string
@@ -566,6 +571,9 @@ const EN: PanelCopy = {
     selectionAttached: 'Selected text',
     selectionTruncated: '(truncated)',
     removeSelection: 'Remove the selected text',
+    quoteSelection: 'Quote text',
+    transcriptQuoteChip: 'Quoted from this conversation',
+    removeTranscriptQuote: 'Remove the quoted text',
     scrollToBottom: 'Scroll to latest',
     permissionControl: 'Permission preset',
     permissionMenu: 'Permission presets',
@@ -601,7 +609,7 @@ const EN: PanelCopy = {
     commandFailed: (reason) => `Command failed: ${reason}`,
     commandSucceeded: 'Command finished',
     commandProvisional: 'This command needs a real chat: send the first message first',
-    commandAttachmentsUnsupported: 'Commands do not take attachments here. Remove the images or selection, or send the text as a message instead.',
+    commandAttachmentsUnsupported: 'Commands do not take attachments here. Remove the images, the page selection or the quoted text, or send it as a message instead.',
   },
 }
 
@@ -889,6 +897,9 @@ const ZH: PanelCopy = {
     selectionAttached: '选中的网页内容',
     selectionTruncated: '（已截断）',
     removeSelection: '移除选中内容',
+    quoteSelection: '引用文字',
+    transcriptQuoteChip: '引用自本对话',
+    removeTranscriptQuote: '移除引用的文字',
     scrollToBottom: '回到最新消息',
     permissionControl: '权限模式',
     permissionMenu: '权限模式',
@@ -924,7 +935,7 @@ const ZH: PanelCopy = {
     commandFailed: (reason) => `命令执行失败：${reason}`,
     commandSucceeded: '命令已执行',
     commandProvisional: '这条命令需要真实会话：请先发送第一条消息',
-    commandAttachmentsUnsupported: '命令不支持附件：请先移除图片或选中内容，或把它作为普通消息发送。',
+    commandAttachmentsUnsupported: '命令不支持附件：请先移除图片、选中内容或引用的文字，或把它作为普通消息发送。',
   },
 }
 
