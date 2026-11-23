@@ -1284,18 +1284,25 @@ export function App(): React.JSX.Element {
       stoppingRef.current = false
       setStopping(false)
       clearQuestions()
+      // Surface a failed/aborted turn immediately. refreshHistory below replaces
+      // the row list from the log, which now carries the same turn/end event, so
+      // the line survives the reload without duplicating.
+      const endRow = rowFromEvent(payload.event)
+      if (endRow !== null) {
+        setRows((prev) => appendLiveRow(prev, endRow, nextSeq()))
+      }
       await refreshHistory(payload.sessionId)
       return
     }
     if (payload.sessionId !== sessionRef.current) return
     const row = rowFromEvent(payload.event)
     if (row !== null) {
-      setRows((prev) => appendLiveRow(prev, row.kind, row.text, nextSeq(), row.images))
+      setRows((prev) => appendLiveRow(prev, row, nextSeq()))
       return
     }
     if (payload.event.type === 'tool/call') {
       const summary = toolSummary(payload.event.data?.name ?? 'tool', payload.event.data?.arguments, locale)
-      setRows((prev) => appendLiveRow(prev, 'tool', summary, nextSeq()))
+      setRows((prev) => appendLiveRow(prev, { seq: 0, kind: 'tool', text: summary }, nextSeq()))
       return
     }
     if (payload.event.type === 'tool/result') {
@@ -2955,7 +2962,9 @@ export function App(): React.JSX.Element {
             {row.kind === 'assistant' && <span className="assistant-avatar"><img src={whaleUrl} alt={copy.app.assistant} /></span>}
             {row.kind === 'tool'
               ? <ToolActivity row={row} copy={copy} />
-              : <MessageBody row={row} sessionId={sessionRef.current ?? ''} api={api} copy={copy} />}
+              : row.failed === true
+                ? <p className="row-failure" role="status">{row.text}</p>
+                : <MessageBody row={row} sessionId={sessionRef.current ?? ''} api={api} copy={copy} />}
           </div>
         ))}
         {streamRow !== null && (

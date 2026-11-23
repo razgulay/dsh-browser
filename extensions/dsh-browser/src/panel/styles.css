@@ -964,6 +964,23 @@ textarea:focus-visible {
   text-align: center;
 }
 
+/* A turn that failed or stopped early. Centered like .info, but it must read as
+   a warning rather than quiet metadata — the user needs to know why the answer
+   never arrived. */
+.row-failure {
+  max-width: 92%;
+  margin: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--danger-border);
+  border-radius: 6px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.5;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
 /* Markdown content is deliberately open for assistant responses, while user
    messages inherit their compact command-card container. */
 .row .body.md > :first-child {

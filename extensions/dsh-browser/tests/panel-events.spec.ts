@@ -46,6 +46,34 @@ describe('rowFromEvent', () => {
     expect(row).toEqual({ seq: 0, kind: 'assistant', text: '好的' })
   })
 
+  it('surfaces a failed turn with its code and message', () => {
+    const row = rowFromEvent(ev('turn/end', {
+      turn: 3,
+      reason: { kind: 'error', error: { code: 'SERVER', message: '502 bad gateway' } },
+    }))
+    expect(row).toMatchObject({ kind: 'info', failed: true })
+    expect(row?.text).toContain('SERVER')
+    expect(row?.text).toContain('502 bad gateway')
+  })
+
+  it('surfaces a failed turn that reports no code or message', () => {
+    const row = rowFromEvent(ev('turn/end', { turn: 3, reason: { kind: 'error' } }))
+    expect(row).toMatchObject({ kind: 'info', failed: true })
+  })
+
+  it('marks an aborted turn as stopped, without an error code', () => {
+    const row = rowFromEvent(ev('turn/end', { turn: 3, reason: { kind: 'aborted', reason: { kind: 'user' } } }))
+    expect(row).toMatchObject({ kind: 'info', failed: true })
+  })
+
+  it('stays silent for completed, blocked, and max-tokens turns', () => {
+    // 完成/被阻断/上限都已由其它 UI 表达（例如 continuation 提示），这里不该多一行。
+    for (const reason of [{ kind: 'completed' }, { kind: 'blocked' }, { kind: 'max-tokens' }]) {
+      expect(rowFromEvent(ev('turn/end', { turn: 3, reason }))).toBeNull()
+    }
+    expect(rowFromEvent(ev('turn/end', { turn: 3 }))).toBeNull()
+  })
+
   it('renders image-only and mixed multimodal messages from durable attachment refs', () => {
     const image = {
       type: 'image',
@@ -107,15 +135,20 @@ describe('toolSummary', () => {
 describe('appendLiveRow / completeLastTool', () => {
   it('merges consecutive tool rows into one line (no tool spam)', () => {
     let rows: ReturnType<typeof appendLiveRow> = []
-    rows = appendLiveRow(rows, 'user', '帮我操作页面', 1)
-    rows = appendLiveRow(rows, 'tool', '读取页面', 2)
-    rows = appendLiveRow(rows, 'tool', '点击元素 #7', 3)
-    rows = appendLiveRow(rows, 'tool', '填写内容 #9', 4)
+    rows = appendLiveRow(rows, { seq: 0, kind: 'user', text: '帮我操作页面' }, 1)
+    rows = appendLiveRow(rows, { seq: 0, kind: 'tool', text: '读取页面' }, 2)
+    rows = appendLiveRow(rows, { seq: 0, kind: 'tool', text: '点击元素 #7' }, 3)
+    rows = appendLiveRow(rows, { seq: 0, kind: 'tool', text: '填写内容 #9' }, 4)
     rows = completeLastTool(rows, 5)
     expect(rows.map((r) => r.kind)).toEqual(['user', 'tool'])
     expect(rows[1]).toMatchObject({ text: '读取页面 → 点击元素 #7 → 填写内容 #9', status: 'complete' })
-    rows = appendLiveRow(rows, 'assistant', '完成', 6)
+    rows = appendLiveRow(rows, { seq: 0, kind: 'assistant', text: '完成' }, 6)
     expect(rows.map((r) => r.kind)).toEqual(['user', 'tool', 'assistant'])
+  })
+
+  it('carries the failed marker onto the appended row', () => {
+    const rows = appendLiveRow([], { seq: 0, kind: 'info', text: 'This turn failed', failed: true }, 1)
+    expect(rows[0]).toMatchObject({ kind: 'info', failed: true, seq: 1 })
   })
 })
 

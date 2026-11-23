@@ -18,6 +18,8 @@ export interface Row {
   text: string
   images?: ImageAttachmentRef[]
   status?: 'running' | 'complete'
+  /** Set on `info` rows produced by a failed turn; rendered as an error line. */
+  failed?: boolean
 }
 
 /** Minimal view of a SessionEvent (payload in `data`). */
@@ -34,8 +36,22 @@ export interface SessionEventView {
     name?: string
     arguments?: string
     title?: unknown
+    /** `turn/end` payload: why the turn closed. */
+    reason?: TurnEndReason
   }
 }
+
+/**
+ * `turn/end.data.reason` as recorded by the agent loop. The closed set comes
+ * from `dsh-agent-loop`: a turn either completes, stops on the token ceiling,
+ * is blocked by a decision, is aborted by the user, or fails with an error.
+ */
+export type TurnEndReason =
+  | { kind: 'completed' }
+  | { kind: 'max-tokens' }
+  | { kind: 'blocked' }
+  | { kind: 'aborted'; reason?: unknown }
+  | { kind: 'error'; error?: { code?: string; message?: string } }
 
 /** One user-selectable answer exposed by ask_user_question. */
 export interface QuestionOption {
@@ -165,6 +181,24 @@ export function rowFromEvent(event: SessionEventView): Row | null {
         ? null
         : { seq: 0, kind: 'assistant', text, ...(images.length === 0 ? {} : { images }) }
     }
+    case 'turn/end': {
+      // 只有失败/中断的回合需要一行说明：完成、被决策阻断、或 token 上限
+      // 都不该在这里多嘴（上限另有 continuation 提示）。
+      const reason = event.data?.reason
+      if (reason === undefined) return null
+      if (reason.kind !== 'error' && reason.kind !== 'aborted') return null
+      const label = PANEL_COPY[getUiLocale()].app
+      const detail = reason.kind === 'error'
+        ? [reason.error?.code, reason.error?.message].filter(part => part !== undefined && part !== '').join(': ')
+        : ''
+      const suffix = detail === '' ? '' : ` — ${detail}`
+      return {
+        seq: 0,
+        kind: 'info',
+        text: reason.kind === 'error' ? `${label.turnFailed}${suffix}` : label.turnInterrupted,
+        failed: true,
+      }
+    }
     default:
       return null
   }
@@ -185,21 +219,15 @@ export function toolSummary(name: string, argsJson: unknown, locale: UiLocale = 
 }
 
 /** live 合并：若最后一行是工具行则并入（连续工具调用不刷屏），否则新增一行。 */
-export function appendLiveRow(
-  rows: Row[],
-  kind: Row['kind'],
-  text: string,
-  seq: number,
-  images?: ImageAttachmentRef[],
-): Row[] {
-  if (kind === 'tool') {
+export function appendLiveRow(rows: Row[], row: Row, seq: number): Row[] {
+  if (row.kind === 'tool') {
     const last = rows[rows.length - 1]
     if (last?.kind === 'tool') {
-      return [...rows.slice(0, -1), { seq, kind: 'tool', text: `${last.text} → ${text}`, status: 'running' }]
+      return [...rows.slice(0, -1), { seq, kind: 'tool', text: `${last.text} → ${row.text}`, status: 'running' }]
     }
-    return [...rows, { seq, kind, text, status: 'running' }]
+    return [...rows, { seq, kind: 'tool', text: row.text, status: 'running' }]
   }
-  return [...rows, { seq, kind, text, ...(images === undefined || images.length === 0 ? {} : { images }) }]
+  return [...rows, { ...row, seq }]
 }
 
 /** 标记最后一行工具调用已完成（并入，不新增行）。 */

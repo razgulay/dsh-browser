@@ -209,6 +209,10 @@ export interface PanelCopy {
     assistantWorking: string
     organizingResults: string
     thinking: string
+    /** Prefix for a turn that ended with an error; an optional `— code: message` follows. */
+    turnFailed: string
+    /** A turn stopped before finishing for a reason other than an error. */
+    turnInterrupted: string
     connectedPlaceholder: string
     disconnectedPlaceholder: string
     composerHelp: string
@@ -516,6 +520,8 @@ const EN: PanelCopy = {
     assistantWorking: 'Assistant is working',
     organizingResults: 'Organizing results',
     thinking: 'Thinking',
+    turnFailed: 'This turn failed',
+    turnInterrupted: 'Stopped before finishing',
     connectedPlaceholder: 'Tell me what you want to do on this page…',
     disconnectedPlaceholder: 'Connect to dsh to get started',
     composerHelp: 'Enter to send · Shift + Enter for a new line',
@@ -825,6 +831,8 @@ const ZH: PanelCopy = {
     assistantWorking: '助手正在处理',
     organizingResults: '正在整理结果',
     thinking: '正在思考',
+    turnFailed: '本轮执行失败',
+    turnInterrupted: '未完成即中止',
     connectedPlaceholder: '告诉我想在这个页面做什么…',
     disconnectedPlaceholder: '连接 dsh 后即可开始',
     composerHelp: 'Enter 发送 · Shift + Enter 换行',
