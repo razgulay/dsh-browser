@@ -223,6 +223,12 @@ export interface PanelCopy {
     stoppingTurn: string
     addImages: string
     imageUnavailable: string
+    /** Camera button: capture the controlled tab's viewport into the composer. */
+    captureScreenshot: string
+    screenshotUnavailable: string
+    screenshotUnsupportedType: string
+    /** File name shown on the draft image a capture produced. */
+    screenshotName: string
     removeImage: (name: string) => string
     image: string
     imageLoading: string
@@ -549,6 +555,10 @@ const EN: PanelCopy = {
     stoppingTurn: 'Stopping…',
     addImages: 'Add images',
     imageUnavailable: 'This dsh host does not advertise image input',
+    captureScreenshot: 'Capture the visible page',
+    screenshotUnavailable: 'This dsh host does not advertise image input, so a capture cannot be attached',
+    screenshotUnsupportedType: 'This dsh host does not accept PNG images, so a capture cannot be attached',
+    screenshotName: 'page capture',
     removeImage: (name) => `Remove ${name}`,
     image: 'Image',
     imageLoading: 'Loading…',
@@ -875,6 +885,10 @@ const ZH: PanelCopy = {
     stoppingTurn: '正在停止…',
     addImages: '添加图片',
     imageUnavailable: '当前 dsh 宿主未声明图片输入能力',
+    captureScreenshot: '截取可见页面',
+    screenshotUnavailable: '当前 dsh 宿主未声明图片输入能力，无法附加截图',
+    screenshotUnsupportedType: '当前 dsh 宿主不接受 PNG 图片，无法附加截图',
+    screenshotName: '页面截图',
     removeImage: (name) => `移除 ${name}`,
     image: '图片',
     imageLoading: '加载中…',

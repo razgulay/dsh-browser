@@ -1361,8 +1361,12 @@ async function measureImageBytes(data: string, mediaType: string): Promise<{ wid
  * Capture the controlled tab's viewport. `captureVisibleTab` photographs the
  * active tab of the window, so a controlled-but-inactive tab is a hard error
  * rather than a silent capture of the wrong page.
+ *
+ * Exported for the panel's own camera button: a person pressing it wants the
+ * same pixels, the same staleness guards and the same refusals as a model call,
+ * so it must not grow a second capture path beside this one.
  */
-async function dispatchScreenshot(
+export async function dispatchScreenshot(
   tab: Pick<chrome.tabs.Tab, 'id' | 'url'> & { active?: boolean; windowId?: number },
   call: ToolCall,
   signal?: AbortSignal,

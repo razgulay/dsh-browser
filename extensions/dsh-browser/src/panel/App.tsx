@@ -71,6 +71,7 @@ import { approvalReadyForSession, approvalSessionToFocus } from './approvals.ts'
 import {
   browserTimeZone,
   draftImageDataUrl,
+  isImageMediaType,
   parseImageAttachmentLimits,
   prepareImageFiles,
   promptContent,
@@ -412,6 +413,16 @@ function QuoteIcon(): React.JSX.Element {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
       <path d="M8.4 5.5 6.9 8.2h1.9v4.8H4.5V8.5l2-3h1.9Zm7 0L13.9 8.2h1.9v4.8h-4.3V8.5l2-3h1.9Z" />
+    </svg>
+  )
+}
+
+/** Camera: capture the controlled tab's viewport into the composer. */
+function CameraIcon(): React.JSX.Element {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M3.5 7.25h2.6l1.1-1.6h5.6l1.1 1.6h2.6a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-12a1 1 0 0 1-1-1v-6.5a1 1 0 0 1 1-1Z" />
+      <circle cx="10" cy="11" r="2.6" />
     </svg>
   )
 }
@@ -860,6 +871,9 @@ export function App(): React.JSX.Element {
   const [quoteOffer, setQuoteOffer] = useState<QuoteOffer | null>(null)
   const [imageLimits, setImageLimits] = useState<ImageAttachmentLimits | null>(null)
   const [addingImages, setAddingImages] = useState(false)
+  /** A viewport capture is in flight; the camera button is disabled meanwhile. */
+  const [capturing, setCapturing] = useState(false)
+  const capturingRef = useRef(false)
   const [busy, setBusy] = useState(false)
   const [working, setWorking] = useState(false)
   const [continuable, setContinuable] = useState(false)
@@ -2250,6 +2264,52 @@ export function App(): React.JSX.Element {
     setShowSessionPicker(false)
   }
 
+  /**
+   * Photograph the controlled tab into the composer.
+   *
+   * The background owns the capture (active-tab and focused-window guards,
+   * staleness refusals); this only turns the answer into a draft image. The
+   * capture is offered as an attachment rather than sent straight away, so the
+   * person can look at what was taken before it reaches the model.
+   */
+  async function captureScreenshot(): Promise<void> {
+    const limits = imageLimits
+    const sessionId = sessionRef.current
+    if (limits === null || sessionId === null) {
+      setError(copy.app.screenshotUnavailable)
+      return
+    }
+    if (!isImageMediaType('image/png') || !limits.mediaTypes.includes('image/png')) {
+      setError(copy.app.screenshotUnsupportedType)
+      return
+    }
+    if (addingImagesRef.current || sendingRef.current || capturingRef.current) return
+    capturingRef.current = true
+    setCapturing(true)
+    setError(null)
+    try {
+      const shot = await api.captureScreenshot()
+      if (sessionRef.current !== sessionId) return
+      const draft: DraftImage = {
+        id: crypto.randomUUID(),
+        mediaType: 'image/png',
+        data: shot.data,
+        bytes: shot.bytes ?? Math.floor((shot.data.length * 3) / 4),
+        width: shot.width,
+        height: shot.height,
+        name: copy.app.screenshotName,
+      }
+      setDraft((current) => ({ ...current, images: [...current.images, draft] }))
+    } catch (cause) {
+      if (sessionRef.current === sessionId) {
+        setError(cause instanceof Error ? cause.message : String(cause))
+      }
+    } finally {
+      capturingRef.current = false
+      setCapturing(false)
+    }
+  }
+
   async function addImageFiles(files: readonly File[]): Promise<void> {
     const limits = imageLimits
     const sessionId = sessionRef.current
@@ -3517,12 +3577,22 @@ export function App(): React.JSX.Element {
               <button
                 type="button"
                 className="attachment-button"
-                disabled={!sessionReady || busy || addingImages || imageLimits === null
+                disabled={!sessionReady || busy || addingImages || capturing || imageLimits === null
                   || draftImages.length >= imageLimits.maxImagesPerMessage}
                 aria-label={copy.app.addImages}
                 title={imageLimits === null ? copy.app.imageUnavailable : copy.app.addImages}
                 onClick={() => fileInputRef.current?.click()}
               ><AttachmentIcon /></button>
+              <button
+                type="button"
+                className="screenshot-button"
+                disabled={!sessionReady || busy || addingImages || capturing || imageLimits === null
+                  || draftImages.length >= imageLimits.maxImagesPerMessage}
+                aria-busy={capturing}
+                aria-label={copy.app.captureScreenshot}
+                title={imageLimits === null ? copy.app.screenshotUnavailable : copy.app.captureScreenshot}
+                onClick={() => { void captureScreenshot() }}
+              ><CameraIcon /></button>
               <span>{copy.app.composerHelp}</span>
             </span>
             {working ? (

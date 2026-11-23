@@ -2182,6 +2182,35 @@ textarea:focus-visible {
   color: var(--faint);
 }
 
+/* Same hit area and weight as the attachment button: both add a picture to the
+   draft, only the source differs (file picker versus the controlled page). */
+.composer-actions button.screenshot-button {
+  width: 27px;
+  height: 27px;
+  border-color: transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+}
+
+.composer-actions button.screenshot-button:hover:not(:disabled) {
+  border-color: var(--line);
+  background: var(--canvas-deep);
+  color: var(--blue-ink);
+}
+
+.composer-actions button.screenshot-button:disabled {
+  border-color: transparent;
+  background: transparent;
+  color: var(--faint);
+}
+
+.composer-actions button.screenshot-button[aria-busy="true"] {
+  color: var(--blue-ink);
+  opacity: 0.7;
+}
+
 .composer-actions button.stop-button {
   border-color: var(--navy);
   border-radius: 50%;

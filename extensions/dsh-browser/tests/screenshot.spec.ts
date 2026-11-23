@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { dispatchToolCall, type ToolCall } from '../src/background/tools.ts'
+import { dispatchScreenshot, dispatchToolCall, type ToolCall } from '../src/background/tools.ts'
 
 /** 1x1 transparent PNG. */
 const PNG_PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
@@ -146,5 +146,48 @@ describe('browser_screenshot dispatch', () => {
     const answer = await dispatchToolCall(call(), 'auto', undefined, deny)
     expect(answer.ok).toBe(false)
     expect(answer.error?.message).toContain('denied')
+  })
+})
+
+/**
+ * The panel's camera button reuses this exact dispatch instead of growing a
+ * second capture path. These cases pin what that reuse buys: the same
+ * staleness refusals, and no approval prompt at all — pressing the button is
+ * the consent, so asking again would be noise.
+ */
+describe('panel-initiated capture', () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  const panelCall = (): ToolCall => ({ id: 'screenshot-1', name: 'browser_screenshot', args: {} })
+
+  it('captures without any approval involvement', async () => {
+    stubChrome({ id: 7, windowId: 3, active: true })
+    const answer = await dispatchScreenshot({ id: 7, windowId: 3, active: true, url: 'https://example.com/' }, panelCall())
+    expect(answer.ok).toBe(true)
+    if (!answer.ok) return
+    const image = (answer.result as { image: { data: string; mediaType: string; width: number } }).image
+    expect(image.data).toBe(PNG_PIXEL)
+    expect(image.mediaType).toBe('image/png')
+  })
+
+  it('refuses a tab that is not active, rather than photographing the wrong page', async () => {
+    stubChrome({ id: 7, windowId: 3, active: false })
+    const answer = await dispatchScreenshot({ id: 7, windowId: 3, active: false, url: 'https://example.com/' }, panelCall())
+    expect(answer.ok).toBe(false)
+    expect(answer.error?.message).toContain('not the active tab')
+  })
+
+  it('refuses an unfocused window, where the frame could be stale', async () => {
+    stubChrome({ id: 7, windowId: 3, active: true }, undefined, { focused: false })
+    const answer = await dispatchScreenshot({ id: 7, windowId: 3, active: true, url: 'https://example.com/' }, panelCall())
+    expect(answer.ok).toBe(false)
+    expect(answer.error?.message).toContain('not focused')
+  })
+
+  it('surfaces a capture failure instead of returning empty pixels', async () => {
+    stubChrome({ id: 7, windowId: 3, active: true }, () => { throw new Error('capture exploded') })
+    const answer = await dispatchScreenshot({ id: 7, windowId: 3, active: true, url: 'https://example.com/' }, panelCall())
+    expect(answer.ok).toBe(false)
+    expect(answer.error?.message).toContain('capture exploded')
   })
 })
