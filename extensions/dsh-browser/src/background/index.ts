@@ -2056,19 +2056,22 @@ chrome.runtime.onConnect.addListener((port) => {
         }
         void (async () => {
           await affinityReady
-          const resolution = tabAffinity.resolveTarget()
-          if (resolution.kind !== 'target') {
-            reply({ ok: false, error: { message: 'No page is being controlled right now, so there is nothing to capture.' } })
+          // Resolve exactly like a tool call would: a panel that has not bound
+          // a tab yet must get the *current* page bound, not a refusal. Reading
+          // `resolveTarget` directly skipped that first-bind step, so pressing
+          // the button before any prompt looked like "no page is controlled".
+          const sessionId = panelActiveSessions.get(port)
+          const resolved = await resolveToolTab(sessionId)
+          if ('ok' in resolved) {
+            // `resolveToolTab` answers with a ToolAnswer when it refuses; its
+            // message already explains which condition failed.
+            reply({
+              ok: false,
+              error: { message: resolved.error?.message ?? 'No page is being controlled right now, so there is nothing to capture.' },
+            })
             return
           }
-          let tab: chrome.tabs.Tab
-          try {
-            tab = await chrome.tabs.get(resolution.tab.tabId)
-          } catch {
-            reply({ ok: false, error: { message: 'The controlled tab closed before the screenshot was captured.' } })
-            return
-          }
-          const answer = await dispatchScreenshot(tab, {
+          const answer = await dispatchScreenshot(resolved, {
             id: requestId,
             name: 'browser_screenshot',
             args: {},
