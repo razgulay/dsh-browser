@@ -1542,6 +1542,56 @@ textarea:focus-visible {
   padding: 10px 12px 0;
 }
 
+/* A highlight taken from the conversation reuses the page-quote card so both
+   attachments look like the same kind of object to the reader. */
+.transcript-quote {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.composer-box > .transcript-quote {
+  padding: 10px 12px 0;
+}
+
+.transcript-quote .page-selection-quote {
+  border-left-color: #c9d2e2;
+}
+
+/* The offer appears only while a highlight exists inside the transcript, so it
+   reads as an action on that highlight rather than a permanent composer button. */
+.quote-offer {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 5px;
+  margin: 8px 12px 0;
+  padding: 3px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--blue-ink);
+  cursor: pointer;
+  font-size: calc(10.5px * var(--ui-scale));
+  font-weight: 660;
+}
+
+.quote-offer:hover {
+  border-color: var(--blue);
+  background: var(--blue-wash);
+}
+
+.quote-offer svg {
+  width: 11px;
+  height: 11px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .page-selection-quote,
 .row .body.md blockquote.page-selection-quote {
   display: -webkit-box;

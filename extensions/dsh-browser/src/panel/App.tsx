@@ -26,6 +26,11 @@ import {
   type UiLocalePreference,
 } from '../i18n.ts'
 import { PANEL_COPY, type PanelCopy } from './strings.ts'
+import {
+  normalizeTranscriptQuote,
+  transcriptQuotePromptText,
+  type TranscriptQuote,
+} from './transcript-quote.ts'
 import { normalizeFaviconUrl } from '../security/favicon.ts'
 import {
   applyUiScale,
@@ -837,6 +842,14 @@ export function App(): React.JSX.Element {
   const input = draft.text
   const draftImages = draft.images
   const [selection, setSelection] = useState<PageSelection | null>(null)
+  /**
+   * A highlight taken from the conversation itself (not from the page). Kept
+   * apart from `selection`: the page quote comes from the background with its
+   * own trust boundary, this one is captured in this document.
+   */
+  const [transcriptQuote, setTranscriptQuote] = useState<TranscriptQuote | null>(null)
+  /** A finished transcript highlight waiting to be quoted, if any. */
+  const [quoteOffer, setQuoteOffer] = useState<TranscriptQuote | null>(null)
   const [imageLimits, setImageLimits] = useState<ImageAttachmentLimits | null>(null)
   const [addingImages, setAddingImages] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -912,6 +925,8 @@ export function App(): React.JSX.Element {
   const seqRef = useRef(0)
   const sessionRef = useRef<string | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  /** The transcript element, for scoping highlight capture. */
+  const messagesRef = useRef<HTMLDivElement | null>(null)
   const atBottomRef = useRef(true)
   /** Transcript offset captured before the settings view replaces it. */
   const savedScrollRef = useRef<number | null>(null)
@@ -1249,6 +1264,46 @@ export function App(): React.JSX.Element {
     observer.observe(element)
     return () => observer.disconnect()
   }, [showSettings, question, error, showSessionPicker, draftImages.length, selection])
+
+  /**
+   * Turn a highlight inside the transcript into a quote attachment.
+   *
+   * Scoped to the message list on purpose: the composer, settings and the
+   * approval dialog all have selectable text too, and turning those highlight
+   * into quotes would be surprising. Only `mouseup`/`keyup` are used — reading
+   * during `selectionchange` would attach half-finished drags.
+   *
+   * Deliberately *not* automatic on selection alone: the user must reach the
+   * composer (an explicit act), matching the page-quote behaviour where the
+   * chip appears only from the panel's own capture flow. Here the trigger is
+   * the "Quote" affordance below, so a stray drag never rewrites the draft.
+   */
+  useEffect(() => {
+    if (showSettings) return
+    const root = messagesRef.current
+    if (root === null) return
+    const capture = (): void => {
+      const selectionObject = window.getSelection()
+      if (selectionObject === null || selectionObject.isCollapsed) {
+        setQuoteOffer(null)
+        return
+      }
+      // Only a highlight that starts inside the transcript qualifies.
+      const anchor = selectionObject.anchorNode
+      if (anchor === null || !root.contains(anchor)) {
+        setQuoteOffer(null)
+        return
+      }
+      const quote = normalizeTranscriptQuote(selectionObject.toString())
+      setQuoteOffer(quote ?? null)
+    }
+    document.addEventListener('mouseup', capture)
+    document.addEventListener('keyup', capture)
+    return () => {
+      document.removeEventListener('mouseup', capture)
+      document.removeEventListener('keyup', capture)
+    }
+  }, [showSettings])
 
   useEffect(() => {
     if (!showModelPicker) return
@@ -2202,9 +2257,10 @@ export function App(): React.JSX.Element {
     const submittedImages = textOverride === undefined ? draftImages : []
     // A quick-start prompt asks about the whole page, not about a quote.
     const submittedSelection = textOverride === undefined ? selection : null
+    const submittedQuote = textOverride === undefined ? transcriptQuote : null
     const id = sessionRef.current
     // busy state 是异步的：连续回车可能都通过 state 检查——用 ref 同步锁。
-    if ((text === '' && submittedImages.length === 0 && submittedSelection === null)
+    if ((text === '' && submittedImages.length === 0 && submittedSelection === null && submittedQuote === null)
       || busy || addingImagesRef.current || sendingRef.current || sessionChangingRef.current || id === null) return
 
     // A line starting with `/` is a command or a skill, never an ordinary
@@ -2222,7 +2278,7 @@ export function App(): React.JSX.Element {
       return
     }
     if (resolution.kind === 'command') {
-      if (submittedImages.length > 0 || submittedSelection !== null) {
+      if (submittedImages.length > 0 || submittedSelection !== null || submittedQuote !== null) {
         setError(copy.app.commandAttachmentsUnsupported)
         return
       }
@@ -2240,6 +2296,9 @@ export function App(): React.JSX.Element {
     const submittedDraft: ComposerDraft<DraftImage> = { text, images: submittedImages }
     if (textOverride === undefined) {
       setDraft(emptyComposerDraft())
+      // The quote travels with this one prompt; it must not linger into the next.
+      setTranscriptQuote(null)
+      setQuoteOffer(null)
     }
     setBusy(true)
     setWorking(true)
@@ -2257,7 +2316,9 @@ export function App(): React.JSX.Element {
         sessionId: id,
         mode: 'queue',
         content: promptContent(
-          submittedSelection === null ? text : selectionPromptText(submittedSelection, text),
+          submittedQuote !== null
+            ? transcriptQuotePromptText(submittedQuote, text)
+            : submittedSelection === null ? text : selectionPromptText(submittedSelection, text),
           submittedImages,
         ),
         ...(clientTimeZone === undefined ? {} : { clientTimeZone }),
@@ -3110,7 +3171,10 @@ export function App(): React.JSX.Element {
               )}
         </section>
       )}
-      <div className="messages" ref={scrollRef} onScroll={syncScrollBottom}>
+      <div className="messages" ref={(element) => {
+        scrollRef.current = element
+        messagesRef.current = element
+      }} onScroll={syncScrollBottom}>
         {rows.length === 0 && streamRow === null && !working && (<>
           <div className="star-banner">
             <span>{copy.app.starBanner}</span>
@@ -3250,6 +3314,44 @@ export function App(): React.JSX.Element {
               label={copy.app.selectionChip}
               onRemove={dismissSelection}
             />
+          )}
+          {transcriptQuote !== null && (
+            <div className="transcript-quote">
+              <blockquote className="page-selection-quote" title={transcriptQuote.text}>
+                {transcriptQuote.text}
+                {transcriptQuote.truncated && (
+                  <span className="page-selection-truncated"> {copy.app.selectionTruncated}</span>
+                )}
+              </blockquote>
+              <div className="page-selection-meta">
+                <span className="page-selection-chip">
+                  <QuoteIcon />
+                  <span>{copy.app.transcriptQuoteChip}</span>
+                  <button
+                    type="button"
+                    aria-label={copy.app.removeTranscriptQuote}
+                    title={copy.app.removeTranscriptQuote}
+                    onClick={() => setTranscriptQuote(null)}
+                  >×</button>
+                </span>
+              </div>
+            </div>
+          )}
+          {transcriptQuote === null && quoteOffer !== null && (
+            <button
+              type="button"
+              className="quote-offer"
+              onClick={() => {
+                setTranscriptQuote(quoteOffer)
+                setQuoteOffer(null)
+                // Drop the highlight: it now lives in the composer, and leaving
+                // it selected would make a second click look like a new quote.
+                window.getSelection()?.removeAllRanges()
+              }}
+            >
+              <QuoteIcon />
+              <span>{copy.app.quoteSelection}</span>
+            </button>
           )}
           {draftImages.length > 0 && (
             <div className="draft-images" aria-label={copy.app.addImages}>
