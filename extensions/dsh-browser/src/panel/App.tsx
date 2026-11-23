@@ -852,6 +852,8 @@ export function App(): React.JSX.Element {
   const [trustedOriginInput, setTrustedOriginInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [showSessionPicker, setShowSessionPicker] = useState(false)
+  const sessionPickerRef = useRef<HTMLElement | null>(null)
+  const sessionMenuTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [loadingSessions, setLoadingSessions] = useState(false)
   const [sessionChanging, setSessionChanging] = useState(false)
   const [sessionList, setSessionList] = useState<SessionPickerEntry[]>([])
@@ -1254,6 +1256,33 @@ export function App(): React.JSX.Element {
     document.addEventListener('pointerdown', onPointerDown, true)
     return () => { document.removeEventListener('pointerdown', onPointerDown, true) }
   }, [showSlashMenu])
+
+  // The session picker is a sibling overlay, so it owns its own dismissal: a
+  // pointer outside it closes it, and so does Escape. The trigger is exempt,
+  // because its own click handler already toggles the picker — closing here
+  // first would make the toggle below re-open it on the same click.
+  useEffect(() => {
+    if (!showSessionPicker) return
+    const onPointerDown = (event: PointerEvent): void => {
+      const root = sessionPickerRef.current
+      if (root !== null && event.target instanceof Node && root.contains(event.target)) return
+      const trigger = sessionMenuTriggerRef.current
+      if (trigger !== null && event.target instanceof Node && trigger.contains(event.target)) return
+      setShowSessionPicker(false)
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      setShowSessionPicker(false)
+      // Escape returns focus to the control that opened the pane.
+      sessionMenuTriggerRef.current?.focus()
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('keydown', onKeyDown, true)
+    }
+  }, [showSessionPicker])
 
   function applyObservedSession(sessionId: string): void {
     if (sessionRef.current !== sessionId) return
@@ -2972,7 +3001,8 @@ export function App(): React.JSX.Element {
           <span className={`dot ${state}`} />
           <span className="connection-label">{statusText}</span>
         </span>
-        <button className="session-menu-trigger" disabled={state !== 'connected' || sessionSwitchBlocked}
+        <button className="session-menu-trigger" ref={sessionMenuTriggerRef}
+          disabled={state !== 'connected' || sessionSwitchBlocked}
           aria-expanded={showSessionPicker} aria-label={copy.app.openSessions}
           onClick={() => { void openSessionPicker() }} title={sessionMenuTitle}>
           <span>{sessionMenuTitle}</span>
@@ -2992,7 +3022,7 @@ export function App(): React.JSX.Element {
         </div>
       </header>
       {showSessionPicker && (
-        <section className="session-picker" aria-label={copy.app.sessions}>
+        <section className="session-picker" aria-label={copy.app.sessions} ref={sessionPickerRef}>
           <div className="session-picker-head">
             <strong>{copy.app.sessions}</strong>
             <button className="session-new" disabled={state !== 'connected' || sessionSwitchBlocked}
