@@ -628,6 +628,9 @@ textarea:focus-visible {
 }
 
 .messages {
+  /* The quote offer is absolutely positioned against this element, so its
+     coordinates live in the same scroll space as the text it points at. */
+  position: relative;
   display: flex;
   min-height: 0;
   flex: 1;
@@ -1560,11 +1563,12 @@ textarea:focus-visible {
 }
 
 /* The offer floats at the highlight it acts on: it appears while a passage is
-   selected inside the transcript, and disappears with the selection. Fixed
-   positioning plus the rect captured at selection time keeps it beside the text
-   even while the transcript scrolls behind it. */
+   selected inside the transcript, and disappears with the selection.
+   Absolutely positioned inside `.messages`, not fixed to the viewport — the
+   coordinates are already in the transcript's scroll space, so scrolling moves
+   the button together with the text instead of leaving it stranded. */
 .quote-offer {
-  position: fixed;
+  position: absolute;
   z-index: 60;
   display: inline-flex;
   align-items: center;
