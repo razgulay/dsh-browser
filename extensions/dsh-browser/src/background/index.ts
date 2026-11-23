@@ -56,6 +56,7 @@ import { frameDocumentKey, listTabFrames } from './frames.ts'
 import {
   dispatchOpenTab,
   dispatchOpenWindow,
+  dispatchScreenshot,
   dispatchToolCall,
   isNavigationCandidateTool,
   isTabManagementTool,
@@ -2037,6 +2038,47 @@ chrome.runtime.onConnect.addListener((port) => {
       }
       case 'discovery.cancel': {
         activeScan?.controller.abort()
+        break
+      }
+      case 'screenshot.capture': {
+        // The panel's own camera button. The person pressed it, so no approval
+        // is raised: a prompt asking "may I capture the screen you just asked
+        // me to capture" is noise, and the click is the consent. Everything
+        // else — the active-tab and focused-window guards, the JPEG/PNG
+        // options, the refusal on protected pages — is shared with the model
+        // path, because a second capture route would drift from it.
+        const request = message as { id?: unknown }
+        if (typeof request.id !== 'string') break
+        // Narrowed once: the closure below outlives this scope.
+        const requestId = request.id
+        const reply = (payload: Record<string, unknown>): void => {
+          try { port.postMessage({ type: 'screenshot.result', id: requestId, ...payload }) } catch { /* port closed */ }
+        }
+        void (async () => {
+          await affinityReady
+          const resolution = tabAffinity.resolveTarget()
+          if (resolution.kind !== 'target') {
+            reply({ ok: false, error: { message: 'No page is being controlled right now, so there is nothing to capture.' } })
+            return
+          }
+          let tab: chrome.tabs.Tab
+          try {
+            tab = await chrome.tabs.get(resolution.tab.tabId)
+          } catch {
+            reply({ ok: false, error: { message: 'The controlled tab closed before the screenshot was captured.' } })
+            return
+          }
+          const answer = await dispatchScreenshot(tab, {
+            id: requestId,
+            name: 'browser_screenshot',
+            args: {},
+          })
+          if (!answer.ok) {
+            reply({ ok: false, error: { message: answer.error?.message ?? 'The screenshot could not be captured.' } })
+            return
+          }
+          reply({ ok: true, result: answer.result })
+        })()
         break
       }
       case 'selection.clear': {

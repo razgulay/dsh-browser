@@ -88,6 +88,7 @@ describe('session picker dismissal', () => {
       updateSettings: vi.fn(async () => {}),
       onDevToolsStatus: vi.fn(() => unsubscribe),
       detachDevTools: vi.fn(async () => undefined),
+      captureScreenshot: vi.fn(async () => ({ data: '', mediaType: 'image/png', width: 1, height: 1 })),
       requestStatus: vi.fn(async () => {}),
       startDiscovery: vi.fn(async () => []),
       cancelDiscovery: vi.fn(async () => {}),

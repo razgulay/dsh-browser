@@ -156,7 +156,55 @@ interface DevToolsDetachResultMessage {
   error?: { message?: unknown }
 }
 
-type BackgroundMessage = RpcResultMessage | RespondResultMessage | SettingsResultMessage | StatusMessage | EventMessage | ApprovalRequestMessage | ApprovalResolvedMessage | TabAffinityMessage | TabAffinityRebindResultMessage | TabAffinityReturnResultMessage | SelectionMessage | SessionResumeHintMessage | DevToolsStatusMessage | DevToolsDetachResultMessage | DiscoveryProgressMessage | DiscoveryResultMessage
+/** One viewport capture the person asked the panel for. */
+export interface CapturedScreenshot {
+  mediaType: string
+  /** Base64 pixels, exactly as `captureVisibleTab` produced them. */
+  data: string
+  width: number
+  height: number
+  bytes?: number
+}
+
+interface ScreenshotResultMessage {
+  type: 'screenshot.result'
+  id: string
+  ok: boolean
+  result?: { image?: { data?: unknown; mediaType?: unknown; width?: unknown; height?: unknown; bytes?: unknown } }
+  error?: { message?: unknown }
+}
+
+/**
+ * Narrow a capture payload before the panel builds a draft image from it.
+ *
+ * The value crossed a process boundary, so the background's own typing is not
+ * evidence of its shape: a wrong `mediaType` would end up in a `data:` URL and
+ * an unbounded base64 string would be decoded on the UI thread.
+ */
+function parseCapturedScreenshot(value: {
+  data?: unknown
+  mediaType?: unknown
+  width?: unknown
+  height?: unknown
+  bytes?: unknown
+}): CapturedScreenshot | null {
+  if (typeof value.data !== 'string' || value.data === '') return null
+  // Base64 only: anything else cannot go into a `data:` URL safely.
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value.data)) return null
+  if (typeof value.mediaType !== 'string' || !value.mediaType.startsWith('image/')) return null
+  const positive = (input: unknown): input is number =>
+    typeof input === 'number' && Number.isSafeInteger(input) && input > 0
+  if (!positive(value.width) || !positive(value.height)) return null
+  return {
+    data: value.data,
+    mediaType: value.mediaType,
+    width: value.width,
+    height: value.height,
+    ...(positive(value.bytes) ? { bytes: value.bytes } : {}),
+  }
+}
+
+type BackgroundMessage = RpcResultMessage | RespondResultMessage | SettingsResultMessage | StatusMessage | EventMessage | ApprovalRequestMessage | ApprovalResolvedMessage | TabAffinityMessage | TabAffinityRebindResultMessage | TabAffinityReturnResultMessage | SelectionMessage | SessionResumeHintMessage | DevToolsStatusMessage | DevToolsDetachResultMessage | ScreenshotResultMessage | DiscoveryProgressMessage | DiscoveryResultMessage
 
 /** Structured gateway failure retained for product-level error handling. */
 export class PanelRpcError extends Error {
@@ -192,6 +240,14 @@ export interface PanelApi {
   onDevToolsStatus(callback: (status: DevToolsStatus) => void): () => void
   /** Detach the debugger now, keeping the developer-tools setting as it is. */
   detachDevTools(): Promise<void>
+  /**
+   * Capture the controlled tab's viewport for the composer.
+   *
+   * The person pressed the button, so this raises no approval prompt; the
+   * background still enforces the active-tab and focused-window guards that
+   * keep a stale frame from being presented as the current page.
+   */
+  captureScreenshot(): Promise<CapturedScreenshot>
   respondToApproval(id: string, decision: ApprovalDecision): Promise<void>
   resolveTabAffinity(revision: number, decision: TabAffinityDecision, sessionId: string | null): Promise<void>
   rebindTabAffinity(): Promise<void>
@@ -248,6 +304,10 @@ export function connectPanel(): PanelApi {
   const sessionResumeHintListeners = new Set<(sessionId: string | null) => void>()
   const devToolsStatusListeners = new Set<(status: DevToolsStatus) => void>()
   const pendingDetaches = new Map<string, { resolve: () => void; reject: (error: Error) => void }>()
+  const pendingScreenshots = new Map<string, {
+    resolve: (value: CapturedScreenshot) => void
+    reject: (error: Error) => void
+  }>()
 
   let port: chrome.runtime.Port | null = null
   let reconnectPromise: Promise<chrome.runtime.Port> | null = null
@@ -320,6 +380,30 @@ export function connectPanel(): PanelApi {
         ))
         break
       }
+      case 'screenshot.result': {
+        const entry = pendingScreenshots.get(msg.id)
+        if (entry === undefined) return
+        pendingScreenshots.delete(msg.id)
+        const image = msg.result?.image
+        if (!msg.ok || image === undefined) {
+          entry.reject(new PanelRpcError(
+            'screenshot-failed',
+            typeof msg.error?.message === 'string'
+              ? msg.error.message
+              : (getUiLocale() === 'zh' ? '截图失败' : 'The screenshot could not be captured.'),
+          ))
+          return
+        }
+        // Pixels cross a process boundary, so the panel narrows the shape again
+        // instead of trusting the background's typing.
+        const captured = parseCapturedScreenshot(image)
+        if (captured === null) {
+          entry.reject(new PanelRpcError('screenshot-failed', getUiLocale() === 'zh' ? '截图数据格式异常' : 'The captured image was not in a usable format.'))
+          return
+        }
+        entry.resolve(captured)
+        break
+      }
       case 'event':
         for (const listener of eventListeners) listener(msg.frame)
         break
@@ -389,7 +473,7 @@ export function connectPanel(): PanelApi {
     return cause instanceof Error ? cause : new Error(fallback)
   }
 
-  function failAll(error: Error, preserve?: { kind: 'rpc' | 'respond' | 'rebind' | 'return' | 'settings' | 'devtools' | 'scan'; id: string }): void {
+  function failAll(error: Error, preserve?: { kind: 'rpc' | 'respond' | 'rebind' | 'return' | 'settings' | 'devtools' | 'scan' | 'screenshot'; id: string }): void {
     for (const [id, entry] of pending) {
       if (preserve?.kind === 'rpc' && preserve.id === id) continue
       entry.reject(error)
@@ -426,6 +510,11 @@ export function connectPanel(): PanelApi {
       entry.reject(error)
       pendingScans.delete(id)
     }
+    for (const [id, entry] of pendingScreenshots) {
+      if (preserve?.kind === 'screenshot' && preserve.id === id) continue
+      entry.reject(error)
+      pendingScreenshots.delete(id)
+    }
   }
 
   function attach(next: chrome.runtime.Port): chrome.runtime.Port {
@@ -460,7 +549,7 @@ export function connectPanel(): PanelApi {
   function invalidate(
     stale: chrome.runtime.Port,
     error: Error,
-    preserve?: { kind: 'rpc' | 'respond' | 'rebind' | 'return' | 'settings' | 'devtools' | 'scan'; id: string },
+    preserve?: { kind: 'rpc' | 'respond' | 'rebind' | 'return' | 'settings' | 'devtools' | 'scan' | 'screenshot'; id: string },
   ): void {
     if (port !== stale) return
     port = null
@@ -475,7 +564,7 @@ export function connectPanel(): PanelApi {
    */
   function send(
     message: unknown,
-    preserve?: { kind: 'rpc' | 'respond' | 'rebind' | 'return' | 'settings' | 'devtools' | 'scan'; id: string },
+    preserve?: { kind: 'rpc' | 'respond' | 'rebind' | 'return' | 'settings' | 'devtools' | 'scan' | 'screenshot'; id: string },
   ): Promise<void> {
     const current = port
     if (current !== null) {
@@ -583,6 +672,21 @@ export function connectPanel(): PanelApi {
         ).catch((cause: unknown) => {
           if (pendingDetaches.get(id) !== entry) return
           pendingDetaches.delete(id)
+          reject(connectionError(cause))
+        })
+      })
+    },
+    captureScreenshot() {
+      const id = crypto.randomUUID()
+      return new Promise<CapturedScreenshot>((resolve, reject) => {
+        const entry = { resolve, reject }
+        pendingScreenshots.set(id, entry)
+        void send(
+          { type: 'screenshot.capture', id },
+          { kind: 'screenshot', id },
+        ).catch((cause: unknown) => {
+          if (pendingScreenshots.get(id) !== entry) return
+          pendingScreenshots.delete(id)
           reject(connectionError(cause))
         })
       })
