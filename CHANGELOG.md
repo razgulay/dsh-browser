@@ -3,7 +3,7 @@
 **English** | [中文](CHANGELOG.zh-CN.md)
 
 ## latest
-* 2026-11-23 [Feature] A camera button in the composer captures the page you are controlling and attaches it to your message as a draft image, so you can check the shot before sending it; the capture reuses the model-facing screenshot path, including its refusal to photograph a tab that is not the one on screen. It also works on first use, before any message has bound a tab.
+* 2026-11-23 [Feature] A camera button in the composer captures the page you are looking at and attaches it to your message as a draft image, so you can check the shot before sending it. It works on first use, before any message has bound a tab, and after switching tabs it captures the one now on screen rather than the one bound earlier.
 * 2026-11-23 [Feature] Selecting text in the conversation offers "Quote text" right at the highlight, which attaches that passage to your next message as attributed, fenced quoted text rather than plain typed words; the offer travels with the text when the conversation scrolls, and disappears as soon as you click away.
 * 2026-11-23 [Fix] Sending a message after scrolling up brings the new turn into view, instead of leaving the answer below the fold.
 * 2026-11-23 [Fix] Returning from settings puts the conversation back where you left it, instead of jumping to the top of the transcript.
