@@ -42,6 +42,16 @@ export interface PickerRelayPorts {
   listFrames(tabId: number): Promise<Array<{ frameId: number; url: string }>>
   /** Deliver the end of a session to the panel exactly once. */
   report(outcome: PickerOutcome): void
+  /**
+   * Make the tab scriptable before arming it.
+   *
+   * Manifest content scripts do not run in tabs that were already open when the
+   * extension was installed or reloaded, and a freshly opened tab has no
+   * receiver until something injects one. Without this the picker works only on
+   * tabs a tool already visited — which looks like "it only works on the tab I
+   * followed".
+   */
+  prepare?(tabId: number): Promise<void>
 }
 
 /** One in-flight picker session. */
@@ -52,6 +62,8 @@ interface ActiveSession {
   epoch: string
   finished: boolean
   ports: PickerRelayPorts
+  /** Frames that acknowledged the arm; zero means the session can never end. */
+  armedFrames: number
 }
 
 let sessionCounter = 0
@@ -75,6 +87,7 @@ export async function startPicker(tabId: number, ports: PickerRelayPorts): Promi
     epoch: currentEpoch,
     finished: false,
     ports,
+    armedFrames: 0,
   }
   active = session
 
@@ -97,14 +110,28 @@ export async function startPicker(tabId: number, ports: PickerRelayPorts): Promi
 
   // Arm every frame. A frame with no content script (protected, or freshly
   // navigated) rejects; that is expected and not fatal, because the others still
-  // make the session usable.
+  // make the session usable. `prepare` narrows that window by installing the
+  // script first.
+  if (ports.prepare !== undefined) {
+    try { await ports.prepare(tabId) } catch { /* a protected page stays unarmed */ }
+  }
   await Promise.all(frames.map((frame) =>
     ports.sendToFrame(tabId, frame.frameId, {
       type: 'DSH_PICKER',
       enabled: true,
       epoch: session.epoch,
       sessionId: session.sessionId,
-    }).catch(() => undefined)))
+    }).then(() => { session.armedFrames += 1 }, () => undefined)))
+
+  // If not one frame accepted the arm, the session is a no-op that would leave
+  // the button lit over a page that will never answer. Fail loudly instead.
+  if (session.armedFrames === 0) {
+    endSession(session, {
+      status: 'error',
+      message: 'The picker could not be loaded on this page. It may be a protected page or one that blocks extension scripts.',
+    })
+    return undefined
+  }
 
   return session.sessionId
 }

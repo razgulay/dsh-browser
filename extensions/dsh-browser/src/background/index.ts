@@ -57,6 +57,7 @@ import {
   dispatchOpenTab,
   dispatchOpenWindow,
   dispatchScreenshot,
+  injectContentScript,
   dispatchToolCall,
   isNavigationCandidateTool,
   isTabManagementTool,
@@ -2154,6 +2155,19 @@ chrome.runtime.onConnect.addListener((port) => {
                   result: { ...result, tabId, controlled },
                 })
               } catch { /* port closed */ }
+            },
+            // A tab opened after the worker started has no content script until
+            // something injects it, and a frame with no receiver cannot be
+            // armed. Injecting here is what makes the button work on the page the
+            // person actually just opened rather than only on a tab a tool has
+            // already visited.
+            prepare: async (target) => {
+              try {
+                await injectContentScript(target)
+              } catch {
+                // Protected pages (chrome://, the extension store) reject
+                // injection; the session then simply has fewer armed frames.
+              }
             },
           })
           try {
