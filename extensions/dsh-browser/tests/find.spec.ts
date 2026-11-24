@@ -87,6 +87,82 @@ describe('findElements', () => {
     const selector = uniqueSelectorFor(sibling)
     expect(document.querySelector(selector)).toBe(sibling)
   })
+
+  it('prefers a short :nth-of-type chain over an absolute nth-child path', () => {
+    // An ordinary paragraph in an article. The old walk produced
+    // `html > body > div:nth-child(1) > article:nth-child(1) > p:nth-child(2)`.
+    document.body.innerHTML = `
+      <div><article><p>one</p><p>two</p><p>three</p></article></div>
+    `
+    const target = document.querySelectorAll('p')[1]!
+    const selector = uniqueSelectorFor(target)
+
+    expect(document.querySelector(selector)).toBe(target)
+    // No positional noise anywhere in the chain.
+    expect(selector).not.toContain(':nth-child')
+    expect(selector).toContain(':nth-of-type(2)')
+    expect(selector).toBe('p:nth-of-type(2)')
+  })
+
+  it('omits an index when the tag is already unique among its siblings', () => {
+    document.body.innerHTML = '<main><article><h1>Title</h1></article></main>'
+    const target = document.querySelector('h1')!
+    const selector = uniqueSelectorFor(target)
+
+    expect(document.querySelector(selector)).toBe(target)
+    expect(selector).toBe('h1')
+  })
+
+  it('anchors to a unique id ancestor and stops there', () => {
+    document.body.innerHTML = `
+      <div><div><section id="panel"><ul><li>a</li><li>b</li></ul></section></div></div>
+    `
+    const target = document.querySelectorAll('li')[1]!
+    const selector = uniqueSelectorFor(target)
+
+    expect(document.querySelector(selector)).toBe(target)
+    expect(selector.startsWith('#panel')).toBe(true)
+    expect(selector).toBe('#panel > ul > li:nth-of-type(2)')
+  })
+
+  it('does not trust a duplicated id', () => {
+    // Duplicate ids are common in the wild; `#dup` alone would be ambiguous.
+    document.body.innerHTML = '<div id="dup"><span>a</span></div><div id="dup"><span>b</span></div>'
+    const target = document.querySelectorAll('#dup span')[1]!
+    const selector = uniqueSelectorFor(target)
+
+    expect(document.querySelector(selector)).toBe(target)
+    expect(selector).not.toBe('#dup > span')
+  })
+
+  it('survives an unrelated sibling inserted before the target', () => {
+    // `:nth-of-type` is the point: a sibling of a *different* tag must not move
+    // the target. `:nth-child` would have, which is why the old chain was
+    // brittle on any page that inserts a banner, an ad slot, or a live region.
+    document.body.innerHTML = '<div><article><p>one</p><p>two</p></article></div>'
+    const target = document.querySelectorAll('p')[1]!
+    const selector = uniqueSelectorFor(target)
+    expect(selector).not.toContain(':nth-child')
+
+    const banner = document.createElement('div')
+    banner.textContent = 'notice'
+    document.querySelector('article')!.prepend(banner)
+
+    expect(document.querySelector(selector)).toBe(target)
+  })
+
+  it('returns a working selector for every element on a denser page', () => {
+    document.body.innerHTML = `
+      <div><ul><li><a href="#1">a</a></li><li><a href="#2">b</a></li></ul></div>
+      <div><ul><li><button>x</button></li><li><button>y</button></li></ul></div>
+    `
+    for (const element of document.body.querySelectorAll('*')) {
+      if (element === document.body) continue
+      const selector = uniqueSelectorFor(element)
+      expect(selector).not.toBe('')
+      expect(document.querySelector(selector)).toBe(element)
+    }
+  })
 })
 
 describe('renderFound', () => {

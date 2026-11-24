@@ -130,46 +130,110 @@ function cssEscape(value: string): string {
 }
 
 /**
- * Build a selector that resolves back to this element. The walk uses
- * `:nth-child` so it stays unique among siblings; an id short-circuits it.
+ * One selector segment for an element, indexed only when siblings share its tag.
+ *
+ * `:nth-of-type` rather than `:nth-child`: inserting an unrelated sibling (a
+ * `<div>` before a list, say) shifts every `:nth-child` after it, while
+ * `:nth-of-type` only moves when a sibling of the *same* tag appears.
+ */
+function selectorSegment(node: Element, parent: Element | null): string {
+  const tag = node.tagName.toLowerCase()
+  if (parent === null) return tag
+  const sameTag = [...parent.children].filter((child) => child.tagName === node.tagName)
+  return sameTag.length > 1 ? `${tag}:nth-of-type(${sameTag.indexOf(node) + 1})` : tag
+}
+
+/**
+ * Build a selector that resolves back to this element.
+ *
+ * The previous version emitted `:nth-child(n)` at every level without ever
+ * checking the result, so an ordinary paragraph came back as
+ * `html > body > div:nth-child(3) > div:nth-child(2) > p:nth-child(1)` — long,
+ * brittle, and broken by any sibling inserted before it. That matters because
+ * this selector is handed to the model and resolved again on the next call: a
+ * brittle selector is a click that misses.
+ *
+ * The rule, in one sentence: anchor at the nearest ancestor with a *unique* id
+ * (verified, because duplicate ids are common), then drop leading tag-only
+ * segments for as long as the shorter form still resolves to this element.
+ * An id anchor is never dropped — it is what keeps the result stable when the
+ * page grows around the target.
  *
  * @param el - target element.
- * @returns a CSS selector, or an empty string when the element has no parent chain.
+ * @returns a CSS selector, or an empty string when the element has no document.
  */
 export function uniqueSelectorFor(el: Element): string {
-  if (el.id !== '') {
-    const byId = `#${cssEscape(el.id)}`
+  const owner = el.ownerDocument
+  if (owner === null) return ''
+  if (el === owner.body) return 'body'
+  const verify = (candidate: string): boolean => {
     try {
-      if (document.querySelectorAll(byId).length === 1) return byId
+      const matches = owner.querySelectorAll(candidate)
+      return matches.length === 1 && matches[0] === el
     } catch {
-      // Fall through to the structural path.
+      return false
     }
   }
+
+  if (el.id !== '') {
+    const byId = `#${cssEscape(el.id)}`
+    if (verify(byId)) return byId
+  }
+
+  // Nearest ancestor whose id resolves uniquely; that id becomes the anchor.
+  // Note the check is "this id matches one element in the document", not "this
+  // id resolves to the target" — an ancestor by definition does not resolve to
+  // its own descendant.
+  let anchorNode: Element | null = null
+  let anchorSelector = ''
+  for (let node = el.parentElement;
+    node !== null && node !== owner.body && node !== owner.documentElement;
+    node = node.parentElement) {
+    if (node.id === '') continue
+    const byId = `#${cssEscape(node.id)}`
+    try {
+      if (owner.querySelectorAll(byId).length === 1) {
+        anchorNode = node
+        anchorSelector = byId
+        break
+      }
+    } catch {
+      // An id that is not a legal selector cannot anchor anything.
+    }
+  }
+
+  const chain: Array<{ segment: string; anchor: boolean }> = []
+  for (let node: Element | null = el; node !== null; node = node.parentElement) {
+    if (node === anchorNode) {
+      chain.unshift({ segment: anchorSelector, anchor: true })
+      break
+    }
+    if (node === owner.body || node === owner.documentElement) break
+    chain.unshift({ segment: selectorSegment(node, node.parentElement), anchor: false })
+  }
+  if (chain.length === 0) return ''
+
+  // Greedy simplification: the shortest prefix-free form that still resolves.
+  while (chain.length > 1 && !chain[0]!.anchor) {
+    const shorter = chain.slice(1).map((entry) => entry.segment).join(' > ')
+    if (!verify(shorter)) break
+    chain.shift()
+  }
+
+  const selector = chain.map((entry) => entry.segment).join(' > ')
+  if (verify(selector)) return selector
+  // Positional fallback: correct even when the tag chain is ambiguous.
+  return positionalSelectorFor(el, owner)
+}
+
+/** Absolute `:nth-child` path, used only when the semantic chain fails. */
+function positionalSelectorFor(el: Element, owner: Document): string {
   const parts: string[] = []
   let node: Element | null = el
-  while (node !== null) {
-    if (node === document.documentElement) {
-      parts.unshift('html')
-      break
-    }
-    if (node.id !== '') {
-      const byId = `#${cssEscape(node.id)}`
-      try {
-        if (document.querySelectorAll(byId).length === 1) {
-          parts.unshift(byId)
-          break
-        }
-      } catch {
-        // Keep walking.
-      }
-    }
+  while (node !== null && node !== owner.documentElement) {
     const parent: Element | null = node.parentElement
-    if (parent === null) {
-      parts.unshift(node.tagName.toLowerCase())
-      break
-    }
-    const position = [...parent.children].indexOf(node) + 1
-    parts.unshift(`${node.tagName.toLowerCase()}:nth-child(${position})`)
+    if (parent === null) break
+    parts.unshift(`${node.tagName.toLowerCase()}:nth-child(${[...parent.children].indexOf(node) + 1})`)
     node = parent
   }
   return parts.join(' > ')
