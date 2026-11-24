@@ -1392,6 +1392,28 @@ export function App(): React.JSX.Element {
     }
   }, [showSettings])
 
+  /**
+   * Escape also cancels an armed pick from the panel side.
+   *
+   * The content script has its own Escape handler, but it only fires when the
+   * page has focus. Pressing the picker button puts focus in the side panel, so
+   * the natural "press Escape to back out" arrives here and nowhere else — the
+   * page would keep its overlay until something else ended the session.
+   */
+  useEffect(() => {
+    if (!picking) return
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      void cancelPick()
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => { window.removeEventListener('keydown', onKeyDown, true) }
+    // `cancelPick` is stable per render and only reached while `picking` is true.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picking])
+
   useEffect(() => {
     if (!showModelPicker) return
     const onPointerDown = (event: PointerEvent): void => {

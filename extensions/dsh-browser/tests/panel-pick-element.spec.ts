@@ -239,6 +239,34 @@ describe('element picker in the composer', () => {
     await vi.waitFor(() => { expect(pickButton().getAttribute('aria-pressed')).toBe('false') })
   })
 
+  it('cancels an armed picker on Escape from the panel side', async () => {
+    await renderConnected()
+    await act(async () => { pickButton().click() })
+    await vi.waitFor(() => { expect(pickButton().getAttribute('aria-pressed')).toBe('true') })
+
+    // Pressing the button put focus in the side panel, so the page's own Escape
+    // listener never sees this key. Without a panel-side handler the overlay
+    // would stay armed until something unrelated ended the session.
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    })
+
+    await vi.waitFor(() => { expect(cancelPicker).toHaveBeenCalledTimes(1) })
+    await vi.waitFor(() => { expect(pickButton().getAttribute('aria-pressed')).toBe('false') })
+  })
+
+  it('leaves Escape alone when no pick is armed', async () => {
+    await renderConnected()
+
+    // Escape at rest belongs to whatever else owns it; the picker must not
+    // swallow it and must not call into the background.
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    })
+
+    expect(cancelPicker).not.toHaveBeenCalled()
+  })
+
   it('clears the armed state when the pick is cancelled in the page', async () => {
     await renderConnected()
     await act(async () => { pickButton().click() })
