@@ -2211,6 +2211,41 @@ textarea:focus-visible {
   opacity: 0.7;
 }
 
+/* The pick button is a mode, not an action: while armed it stays lit so the
+   person can tell the page is waiting for their click. */
+.composer-actions button.pick-button {
+  width: 27px;
+  height: 27px;
+  border-color: transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+}
+
+.composer-actions button.pick-button:hover:not(:disabled) {
+  border-color: var(--line);
+  background: var(--canvas-deep);
+  color: var(--blue-ink);
+}
+
+.composer-actions button.pick-button.armed {
+  border-color: var(--blue);
+  background: var(--blue-soft);
+  color: var(--blue-ink);
+}
+
+.picked-element {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.composer-box > .picked-element {
+  padding: 10px 12px 0;
+}
+
 .composer-actions button.stop-button {
   border-color: var(--navy);
   border-radius: 50%;

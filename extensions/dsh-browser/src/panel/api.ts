@@ -174,6 +174,98 @@ interface ScreenshotResultMessage {
   error?: { message?: unknown }
 }
 
+/** A pick reported by the background, with the frame it came from. */
+export interface PickedElementResult {
+  status: 'picked' | 'cancelled' | 'error'
+  frameId?: number
+  frameUrl?: string
+  element?: {
+    index?: number
+    selector?: string
+    tag?: string
+    role?: string
+    name?: string
+    attributes?: Record<string, string>
+    text?: string
+    rect?: { x: number; y: number; width: number; height: number }
+    masked?: boolean
+  }
+  message?: string
+}
+
+interface PickerStartResultMessage {
+  type: 'picker.start.result'
+  id: string
+  ok: boolean
+  error?: { message?: unknown }
+}
+
+interface PickerCallResultMessage {
+  type: 'picker.cancel.result'
+  id: string
+  ok: boolean
+}
+
+interface PickerResultMessage {
+  type: 'picker.result'
+  result?: unknown
+}
+
+/**
+ * Narrow a picker outcome before the panel renders or attaches it.
+ *
+ * Page-authored all the way down: the element's attributes and text came from
+ * the page, and the shape crossed two process boundaries. Anything unexpected
+ * collapses to an error rather than reaching React as a half-built object.
+ */
+function parsePickedElementResult(value: unknown): PickedElementResult | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const status = record.status
+  if (status === 'cancelled') return { status: 'cancelled' }
+  if (status === 'error') {
+    return { status: 'error', message: typeof record.message === 'string' ? record.message : 'The pick failed.' }
+  }
+  if (status !== 'picked') return null
+
+  const element = typeof record.element === 'object' && record.element !== null
+    ? record.element as Record<string, unknown>
+    : undefined
+  if (element === undefined) return null
+
+  const text = (input: unknown, max: number): string | undefined =>
+    typeof input === 'string' && input !== '' ? input.slice(0, max) : undefined
+  const index = typeof element.index === 'number' && Number.isSafeInteger(element.index) && element.index >= 0
+    ? element.index
+    : undefined
+  const selector = text(element.selector, 500)
+  if (index === undefined && selector === undefined) return null
+
+  const attributes: Record<string, string> = {}
+  if (typeof element.attributes === 'object' && element.attributes !== null && !Array.isArray(element.attributes)) {
+    for (const [key, raw] of Object.entries(element.attributes as Record<string, unknown>)) {
+      if (typeof raw !== 'string' || /^on/i.test(key)) continue
+      attributes[key.slice(0, 64)] = raw.slice(0, 200)
+    }
+  }
+
+  return {
+    status: 'picked',
+    ...(typeof record.frameId === 'number' ? { frameId: record.frameId } : {}),
+    ...(typeof record.frameUrl === 'string' ? { frameUrl: record.frameUrl } : {}),
+    element: {
+      ...(index === undefined ? {} : { index }),
+      ...(selector === undefined ? {} : { selector }),
+      ...(text(element.tag, 40) === undefined ? {} : { tag: text(element.tag, 40)! }),
+      ...(text(element.role, 40) === undefined ? {} : { role: text(element.role, 40)! }),
+      ...(text(element.name, 200) === undefined ? {} : { name: text(element.name, 200)! }),
+      ...(text(element.text, 400) === undefined ? {} : { text: text(element.text, 400)! }),
+      attributes,
+      ...(element.masked === true ? { masked: true } : {}),
+    },
+  }
+}
+
 /**
  * Narrow a capture payload before the panel builds a draft image from it.
  *
@@ -204,7 +296,7 @@ function parseCapturedScreenshot(value: {
   }
 }
 
-type BackgroundMessage = RpcResultMessage | RespondResultMessage | SettingsResultMessage | StatusMessage | EventMessage | ApprovalRequestMessage | ApprovalResolvedMessage | TabAffinityMessage | TabAffinityRebindResultMessage | TabAffinityReturnResultMessage | SelectionMessage | SessionResumeHintMessage | DevToolsStatusMessage | DevToolsDetachResultMessage | ScreenshotResultMessage | DiscoveryProgressMessage | DiscoveryResultMessage
+type BackgroundMessage = RpcResultMessage | RespondResultMessage | SettingsResultMessage | StatusMessage | EventMessage | ApprovalRequestMessage | ApprovalResolvedMessage | TabAffinityMessage | TabAffinityRebindResultMessage | TabAffinityReturnResultMessage | SelectionMessage | SessionResumeHintMessage | DevToolsStatusMessage | DevToolsDetachResultMessage | ScreenshotResultMessage | PickerStartResultMessage | PickerCallResultMessage | PickerResultMessage | DiscoveryProgressMessage | DiscoveryResultMessage
 
 /** Structured gateway failure retained for product-level error handling. */
 export class PanelRpcError extends Error {
@@ -248,6 +340,18 @@ export interface PanelApi {
    * keep a stale frame from being presented as the current page.
    */
   captureScreenshot(): Promise<CapturedScreenshot>
+  /**
+   * Arm the element picker on the controlled tab.
+   *
+   * Resolves once every frame is armed; the pick itself arrives through
+   * {@link onPickResult}. Pressing the button is the consent to read the page,
+   * and acting on the result still goes through the normal tool approval.
+   */
+  startPicker(): Promise<void>
+  /** Abandon an armed picker; resolves after every frame is disarmed. */
+  cancelPicker(): Promise<void>
+  /** Receive the end of a picker session: a pick, a cancel, or an error. */
+  onPickResult(callback: (result: PickedElementResult) => void): () => void
   respondToApproval(id: string, decision: ApprovalDecision): Promise<void>
   resolveTabAffinity(revision: number, decision: TabAffinityDecision, sessionId: string | null): Promise<void>
   rebindTabAffinity(): Promise<void>
@@ -308,6 +412,9 @@ export function connectPanel(): PanelApi {
     resolve: (value: CapturedScreenshot) => void
     reject: (error: Error) => void
   }>()
+  const pendingPickerStarts = new Map<string, { resolve: () => void; reject: (error: Error) => void }>()
+  const pendingPickerCancels = new Map<string, { resolve: () => void; reject: (error: Error) => void }>()
+  const pickResultListeners = new Set<(result: PickedElementResult) => void>()
 
   let port: chrome.runtime.Port | null = null
   let reconnectPromise: Promise<chrome.runtime.Port> | null = null
@@ -404,6 +511,33 @@ export function connectPanel(): PanelApi {
         entry.resolve(captured)
         break
       }
+      case 'picker.start.result': {
+        const entry = pendingPickerStarts.get(msg.id)
+        if (entry === undefined) return
+        pendingPickerStarts.delete(msg.id)
+        if (msg.ok) entry.resolve()
+        else {
+          entry.reject(new PanelRpcError(
+            'picker-failed',
+            typeof msg.error?.message === 'string' ? msg.error.message : 'The element picker could not start.',
+          ))
+        }
+        break
+      }
+      case 'picker.cancel.result': {
+        const entry = pendingPickerCancels.get(msg.id)
+        if (entry === undefined) return
+        pendingPickerCancels.delete(msg.id)
+        entry.resolve()
+        break
+      }
+      case 'picker.result': {
+        // Narrowed here: the payload crossed a process boundary.
+        const parsed = parsePickedElementResult(msg.result)
+        if (parsed === null) return
+        for (const listener of pickResultListeners) listener(parsed)
+        break
+      }
       case 'event':
         for (const listener of eventListeners) listener(msg.frame)
         break
@@ -473,7 +607,7 @@ export function connectPanel(): PanelApi {
     return cause instanceof Error ? cause : new Error(fallback)
   }
 
-  function failAll(error: Error, preserve?: { kind: 'rpc' | 'respond' | 'rebind' | 'return' | 'settings' | 'devtools' | 'scan' | 'screenshot'; id: string }): void {
+  function failAll(error: Error, preserve?: { kind: 'rpc' | 'respond' | 'rebind' | 'return' | 'settings' | 'devtools' | 'scan' | 'screenshot' | 'picker'; id: string }): void {
     for (const [id, entry] of pending) {
       if (preserve?.kind === 'rpc' && preserve.id === id) continue
       entry.reject(error)
@@ -549,7 +683,7 @@ export function connectPanel(): PanelApi {
   function invalidate(
     stale: chrome.runtime.Port,
     error: Error,
-    preserve?: { kind: 'rpc' | 'respond' | 'rebind' | 'return' | 'settings' | 'devtools' | 'scan' | 'screenshot'; id: string },
+    preserve?: { kind: 'rpc' | 'respond' | 'rebind' | 'return' | 'settings' | 'devtools' | 'scan' | 'screenshot' | 'picker'; id: string },
   ): void {
     if (port !== stale) return
     port = null
@@ -564,7 +698,7 @@ export function connectPanel(): PanelApi {
    */
   function send(
     message: unknown,
-    preserve?: { kind: 'rpc' | 'respond' | 'rebind' | 'return' | 'settings' | 'devtools' | 'scan' | 'screenshot'; id: string },
+    preserve?: { kind: 'rpc' | 'respond' | 'rebind' | 'return' | 'settings' | 'devtools' | 'scan' | 'screenshot' | 'picker'; id: string },
   ): Promise<void> {
     const current = port
     if (current !== null) {
@@ -690,6 +824,34 @@ export function connectPanel(): PanelApi {
           reject(connectionError(cause))
         })
       })
+    },
+    startPicker() {
+      const id = crypto.randomUUID()
+      return new Promise<void>((resolve, reject) => {
+        const entry = { resolve, reject }
+        pendingPickerStarts.set(id, entry)
+        void send({ type: 'picker.start', id }, { kind: 'picker', id }).catch((cause: unknown) => {
+          if (pendingPickerStarts.get(id) !== entry) return
+          pendingPickerStarts.delete(id)
+          reject(connectionError(cause))
+        })
+      })
+    },
+    cancelPicker() {
+      const id = crypto.randomUUID()
+      return new Promise<void>((resolve, reject) => {
+        const entry = { resolve, reject }
+        pendingPickerCancels.set(id, entry)
+        void send({ type: 'picker.cancel', id }, { kind: 'picker', id }).catch((cause: unknown) => {
+          if (pendingPickerCancels.get(id) !== entry) return
+          pendingPickerCancels.delete(id)
+          reject(connectionError(cause))
+        })
+      })
+    },
+    onPickResult(callback) {
+      pickResultListeners.add(callback)
+      return () => { pickResultListeners.delete(callback) }
     },
     respondToApproval(id, decision) {
       return send({ type: 'approval.response', id, decision })

@@ -14,6 +14,7 @@ import { DEFAULT_SNAPSHOT_MAX_CHARS } from '@yuxianglin/dsh-bridge-browser/src/p
 import { runAction, ActionError } from './actions.ts'
 import { ElementIds } from './ids.ts'
 import { handleInputSetup } from './input-support.ts'
+import { ElementPickerSession } from './picker.ts'
 import { SelectionWatcher } from './selection.ts'
 import type { InputSetupRequest } from '../shared/input-setup.ts'
 import type { SnapshotBudget } from './snapshot.ts'
@@ -26,6 +27,23 @@ const ids = new ElementIds()
 const selectionWatcher = new SelectionWatcher((selection) => {
   void chrome.runtime.sendMessage({ type: 'DSH_SELECTION', selection }).catch(() => {})
 })
+
+/**
+ * The picker reports through the same one-shot channel as a selection: the
+ * background decides whether this frame is allowed to answer, so the content
+ * script never needs to know which tab or frame it is in.
+ */
+const pickerSession = new ElementPickerSession(
+  {
+    onPick: (element) => {
+      void chrome.runtime.sendMessage({ type: 'DSH_PICKED_ELEMENT', element }).catch(() => {})
+    },
+    onEnd: (reason) => {
+      void chrome.runtime.sendMessage({ type: 'DSH_PICKER_ENDED', reason }).catch(() => {})
+    },
+  },
+  (el) => ids.indexOf(el),
+)
 
 const CONTENT_SCRIPT_LISTENER = '__dshBrowserContentScriptListener__'
 const CONTENT_SELECTION_WATCHER = '__dshBrowserSelectionWatcher__'
@@ -84,6 +102,21 @@ function onMessage(message: unknown, _sender: chrome.runtime.MessageSender, send
     sendResponse({ ok: true })
     return
   }
+  if (msg.type === 'DSH_PICKER') {
+    // Arm/disarm, with the same epoch+revision ordering as the selection
+    // watcher: the background arms every frame and a late arm must not undo a
+    // newer cancel.
+    const command = message as {
+      enabled?: unknown
+      epoch?: unknown
+      sessionId?: unknown
+    }
+    const epoch = typeof command.epoch === 'string' ? command.epoch : 'legacy'
+    const revision = typeof command.sessionId === 'number' ? command.sessionId : 0
+    pickerSession.setEnabled(command.enabled === true, revision, epoch)
+    sendResponse({ ok: true, result: { active: pickerSession.active } })
+    return
+  }
   if (msg.type !== 'DSH_ACTION') return
   const actionMsg = message as {
     action?: string
@@ -115,6 +148,7 @@ function onMessage(message: unknown, _sender: chrome.runtime.MessageSender, send
 const contentGlobal = globalThis as typeof globalThis & {
   [CONTENT_SCRIPT_LISTENER]?: ContentListener
   [CONTENT_SELECTION_WATCHER]?: { dispose: () => void }
+  '__dshBrowserPickerSession__'?: { cancel: () => void }
 }
 const previousListener = contentGlobal[CONTENT_SCRIPT_LISTENER]
 if (previousListener !== undefined) {
@@ -123,8 +157,12 @@ if (previousListener !== undefined) {
 // A replaced content script keeps its page listeners until this instance
 // releases them: `selectionchange` is a document listener, not an extension one.
 contentGlobal[CONTENT_SELECTION_WATCHER]?.dispose()
+// A picker overlay outlives a script reload just as badly: it would sit on the
+// page intercepting clicks with no listener left to receive the pick.
+contentGlobal['__dshBrowserPickerSession__']?.cancel()
 contentGlobal[CONTENT_SCRIPT_LISTENER] = onMessage
 contentGlobal[CONTENT_SELECTION_WATCHER] = selectionWatcher
+contentGlobal['__dshBrowserPickerSession__'] = pickerSession
 chrome.runtime.onMessage.addListener(onMessage)
 
 // A navigation action answers before unloading. The replacement content
