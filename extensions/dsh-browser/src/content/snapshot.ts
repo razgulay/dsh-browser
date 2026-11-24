@@ -12,6 +12,7 @@
 
 import { accessibleName, collectInteractive, isInViewport, isVisible, mainText, pageText, truncate } from './extract.ts'
 import { ElementIds } from './ids.ts'
+import { detectObstruction, renderObstruction, type Obstruction } from './obstruction.ts'
 import { isSensitiveField, maskValue } from './privacy.ts'
 
 /** Role label per element kind (model-facing vocabulary). */
@@ -71,6 +72,12 @@ export interface SnapshotView {
   removed: number[]
   /** true when the inventory was renumbered (model should re-read ids). */
   reindexed: boolean
+  /**
+   * Whatever is covering the page, if anything. A fixed overlay does not remove
+   * the elements beneath it from the inventory, so without this the model sees
+   * usable-looking controls that no click can reach.
+   */
+  obstruction?: Obstruction
   /** Budget accounting: characters cut from main text and items/forms dropped by count caps. */
   truncated: { mainChars: number; itemsDropped: number; formsDropped: number }
   /** 总预算（渲染封顶用）。 */
@@ -296,6 +303,13 @@ export function buildSnapshot(ids: ElementIds, options: SnapshotOptions, last: S
     changed: options.delta === true ? [...changed] : [],
     removed: options.delta === true ? removedIds : [],
     reindexed,
+    // Detection runs once per snapshot, not per delta: what covers the page is
+    // part of describing the page, and a delta that omits it would let the model
+    // keep believing an overlay it never saw dismissed.
+    ...(() => {
+      const obstruction = detectObstruction(document)
+      return obstruction === undefined ? {} : { obstruction }
+    })(),
     truncated: {
       mainChars: main.truncated,
       itemsDropped: Math.max(0, elements.length - options.budget.maxItems),
@@ -362,6 +376,7 @@ function appendTruncationNotes(lines: string[], view: SnapshotView): void {
 
 export function renderSnapshot(view: SnapshotView, delta: boolean, maxChars: number = view.budgetChars): string {
   const lines: string[] = []
+  const obstruction = renderObstruction(view.obstruction)
   if (delta) {
     lines.push(`Page change v${view.version} (${view.url})`)
     const elementChanges = view.changed.filter((id) => id !== -1)
@@ -370,6 +385,9 @@ export function renderSnapshot(view: SnapshotView, delta: boolean, maxChars: num
     const changedForms = view.forms.filter((form) => changedIds.has(form.index))
 
     lines.push(`Status: ${view.ready}${view.reindexed ? ' (element indices were reassigned; use the indices in this snapshot)' : ''}`)
+    // The obstruction line goes before the changes: it explains why none of them
+    // may be actionable.
+    if (obstruction !== undefined) lines.push(obstruction)
     if (view.changed.includes(-1)) {
       lines.push(`Title: ${view.title || '(untitled)'}`)
       if (view.main.length > 0) {
@@ -397,6 +415,7 @@ export function renderSnapshot(view: SnapshotView, delta: boolean, maxChars: num
   lines.push(`Title: ${view.title || '(untitled)'}`)
   lines.push(`URL: ${view.url}`)
   lines.push(`Status: ${view.ready}${view.reindexed ? ' (element indices were reassigned; use the indices in this snapshot)' : ''}`)
+  if (obstruction !== undefined) lines.push(obstruction)
   if (view.main.length > 0) {
     lines.push('')
     lines.push('Main content:')
