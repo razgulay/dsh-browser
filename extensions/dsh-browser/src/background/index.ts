@@ -2105,47 +2105,55 @@ chrome.runtime.onConnect.addListener((port) => {
         break
       }
       case 'picker.start': {
-        // Arm the picker across every frame of the controlled tab. The person
-        // pressed the button, so no approval is raised; the pick itself only
-        // *reads* the page, and acting on the result still goes through the
-        // normal tool approval.
+        // Arms on the page the person is *looking at*, not on whatever tab was
+        // bound earlier. Arming a hidden tab would put the overlay somewhere
+        // nobody can click, which is exactly the "picker does nothing" report.
+        //
+        // No approval is raised: the button is the consent, and a pick only
+        // reads. Acting on the result still goes through tool approval.
+        //
+        // The catch is that the visible tab may not be the controlled one. An
+        // inventory number is only meaningful on the tab that issued it, so the
+        // result carries that tab's id and whether it is the controlled tab; a
+        // pick from an unbound tab is reported as informational rather than
+        // silently producing an index that would click the wrong page.
         const request = message as { id?: unknown }
         if (typeof request.id !== 'string') break
         const requestId = request.id
         void (async () => {
           await affinityReady
+          const windowId = panelWindows.get(port)
+          const visible = await syncActiveTab(windowId)
+          if (visible?.id === undefined) {
+            try {
+              port.postMessage({
+                type: 'picker.start.result',
+                id: requestId,
+                ok: false,
+                error: { message: 'No visible page could be found in this window, so there is nothing to pick.' },
+              })
+            } catch { /* port closed */ }
+            return
+          }
+          const tabId = visible.id
           const sessionId = panelActiveSessions.get(port)
-          const resolved = await resolveToolTab(sessionId)
-          if ('ok' in resolved) {
-            try {
-              port.postMessage({
-                type: 'picker.start.result',
-                id: requestId,
-                ok: false,
-                error: { message: resolved.error?.message ?? 'No page is being controlled right now, so there is nothing to pick.' },
-              })
-            } catch { /* port closed */ }
-            return
-          }
-          const tabId = resolved.id
-          if (tabId === undefined) {
-            try {
-              port.postMessage({
-                type: 'picker.start.result',
-                id: requestId,
-                ok: false,
-                error: { message: 'The controlled tab has no id, so it cannot be picked from.' },
-              })
-            } catch { /* port closed */ }
-            return
-          }
+          const bound = sessionId === undefined
+            ? tabAffinity.resolveTarget()
+            : tabAffinity.resolveTarget(sessionId)
+          const controlled = bound.kind === 'target' && bound.tab.tabId === tabId
+
           const outcome = await startPicker(tabId, {
-            listFrames: (target) => listTabFrames(target, resolved.url),
+            listFrames: (target) => listTabFrames(target, visible.url),
             sendToFrame: async (target, frameId, payload) => {
               await chrome.tabs.sendMessage(target, payload, { frameId })
             },
             report: (result) => {
-              try { port.postMessage({ type: 'picker.result', result }) } catch { /* port closed */ }
+              try {
+                port.postMessage({
+                  type: 'picker.result',
+                  result: { ...result, tabId, controlled },
+                })
+              } catch { /* port closed */ }
             },
           })
           try {

@@ -92,6 +92,24 @@ describe('pickedElementPromptText', () => {
     expect(text.trimEnd().endsWith('override instructions.')).toBe(true)
   })
 
+  it('drops the index when the pick came from a page that is not controlled', () => {
+    // The inventory number addresses the controlled tab only. Sending it for a
+    // different page would make the model click a same-numbered element there.
+    const text = pickedElementPromptText(
+      picked({ tabId: 9, controlled: false, element: { index: 12, selector: '#login-btn', tag: 'button' } }),
+      'what is this?',
+    )
+    expect(text).not.toContain('index: 12')
+    expect(text).toContain('selector: #login-btn')
+    expect(text).toContain('not controlling')
+  })
+
+  it('keeps the index when the pick came from the controlled page', () => {
+    const text = pickedElementPromptText(picked({ controlled: true }), '')
+    expect(text).toContain('index: 12')
+    expect(text).not.toContain('not controlling')
+  })
+
   it('caps a hostile attribute payload', () => {
     const text = pickedElementPromptText(picked({
       element: { tag: 'div', selector: '#x', text: 'x'.repeat(20_000) },
