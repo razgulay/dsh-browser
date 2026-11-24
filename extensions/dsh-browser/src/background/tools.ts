@@ -171,7 +171,17 @@ function isInjectablePage(url: string | undefined): boolean {
 }
 
 /** Inject the packaged content script once per tab, coalescing concurrent recovery attempts. */
-async function injectContentScript(tabId: number): Promise<void> {
+/**
+ * Ensure the content script is present in every frame of one tab.
+ *
+ * Manifest content scripts do not run retroactively in tabs that were already
+ * open when the unpacked extension was installed or reloaded, and a tab opened
+ * after the worker started may not have been touched by any tool yet. The tool
+ * path recovers from a missing receiver inline; the panel's own buttons (picker
+ * and capture) need the same recovery before they talk to a frame, or they fail
+ * on exactly the tabs the user just opened.
+ */
+export async function injectContentScript(tabId: number): Promise<void> {
   let pending = pendingInjections.get(tabId)
   if (pending === undefined) {
     pending = chrome.scripting.executeScript({

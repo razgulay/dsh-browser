@@ -104,6 +104,29 @@ describe('starting a session', () => {
     expect(await startPicker(7, ports)).toBeTypeOf('number')
     expect(pickerActiveFor(7)).toBe(true)
   })
+
+  it('installs the content script before arming', async () => {
+    // A tab opened after the worker started has no receiver until something
+    // injects one; without this the picker only works on tabs a tool visited.
+    const prepare = vi.fn(async () => undefined)
+    const { ports } = makePorts({ prepare })
+    await startPicker(7, ports)
+    expect(prepare).toHaveBeenCalledWith(7)
+  })
+
+  it('reports an error when no frame could be armed at all', async () => {
+    // A protected page (chrome://, the extension store) rejects injection and
+    // has no receiver: leaving the button lit over it would look like a hang.
+    const { ports, reported } = makePorts({
+      prepare: async () => { throw new Error('Cannot access a chrome:// URL') },
+      sendToFrame: vi.fn(async () => { throw new Error('Receiving end does not exist') }),
+    })
+    expect(await startPicker(7, ports)).toBeUndefined()
+    await settle()
+
+    expect(reported[0]).toMatchObject({ status: 'error' })
+    expect(pickerActiveFor(7)).toBe(false)
+  })
 })
 
 describe('accepting a pick', () => {
