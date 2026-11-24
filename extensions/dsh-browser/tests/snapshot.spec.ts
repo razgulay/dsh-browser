@@ -31,6 +31,49 @@ describe('buildSnapshot', () => {
     expect(text).not.toContain('hunter2')
   })
 
+  it('renders the obstruction line before the inventory it invalidates', () => {
+    // A fixed consent dialog that hit-testing lands on at every sample point.
+    // The controls under it stay in the inventory, so the only signal that they
+    // cannot be clicked is this line.
+    document.body.innerHTML = `
+      <button id="real">Accept</button>
+      <div id="cookie-consent" role="dialog" aria-modal="true">
+        <h2>We value your privacy</h2>
+        <button>Accept all</button>
+      </div>
+    `
+    const gate = document.getElementById('cookie-consent') as HTMLElement
+    Object.assign(gate.style, { position: 'fixed', inset: '0', zIndex: '2147483000' })
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 })
+    Object.defineProperty(gate, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ x: 0, y: 0, top: 0, left: 0, width: 1000, height: 800, right: 1000, bottom: 800, toJSON: () => ({}) }),
+    })
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => gate })
+
+    const ids = new ElementIds()
+    const view = buildSnapshot(ids, { budget: BUDGET }, null)
+    expect(view.obstruction).toMatchObject({ selector: '#cookie-consent', blocking: true })
+
+    const text = renderSnapshot(view, false)
+    expect(text).toContain('Blocking overlay: #cookie-consent')
+    // It must be read before the controls it makes unreachable.
+    expect(text.indexOf('Blocking overlay')).toBeLessThan(text.indexOf('Interactive elements:'))
+    // And the inventory still lists them, which is exactly why the line exists.
+    expect(text).toContain('Accept')
+  })
+
+  it('omits the obstruction line on a page with nothing covering it', () => {
+    document.body.innerHTML = '<button>Go</button>'
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => null })
+
+    const ids = new ElementIds()
+    const view = buildSnapshot(ids, { budget: BUDGET }, null)
+    expect(view.obstruction).toBeUndefined()
+    expect(renderSnapshot(view, false)).not.toContain('overlay')
+  })
+
   it('increments versions and keeps element ids stable', () => {
     document.body.innerHTML = '<button>甲</button><button>乙</button>'
     const ids = new ElementIds()
