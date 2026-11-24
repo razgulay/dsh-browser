@@ -87,6 +87,7 @@ import {
   type AffinityTab,
   type TabAffinityDecision,
 } from './tab-affinity.ts'
+import { acceptPick, startPicker, stopPicker } from './picker-relay.ts'
 import { bindOpenedTabAffinity } from './open-tab-binding.ts'
 import { FocusedWindowTracker } from './focused-window.ts'
 import { SelectionTracker, type SelectionSource } from './selection.ts'
@@ -1857,6 +1858,25 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
     })
     return
   }
+  if (type === 'DSH_PICKED_ELEMENT') {
+    // A pick from any frame of the controlled tab. `acceptPick` decides whether
+    // it belongs to the live session and reports through the port that asked;
+    // a reply from an old session is dropped there.
+    const frameId = sender.frameId ?? 0
+    void acceptPick(
+      sender.tab.id,
+      frameId,
+      sender.url ?? sender.tab.url ?? '',
+      (message as { element?: unknown }).element,
+    ).catch(() => undefined)
+    return
+  }
+  if (type === 'DSH_PICKER_ENDED') {
+    // The frame ended its own session (Escape, pagehide). Ending the relay here
+    // keeps the panel's button state honest instead of waiting for a timeout.
+    void stopPicker().catch(() => undefined)
+    return
+  }
   if (type !== 'DSH_SELECTION' || sender.tab === undefined) return
   recordSelection(sender.tab, sender.frameId ?? 0, (message as { selection?: unknown }).selection)
 })
@@ -2082,6 +2102,69 @@ chrome.runtime.onConnect.addListener((port) => {
           }
           reply({ ok: true, result: answer.result })
         })()
+        break
+      }
+      case 'picker.start': {
+        // Arm the picker across every frame of the controlled tab. The person
+        // pressed the button, so no approval is raised; the pick itself only
+        // *reads* the page, and acting on the result still goes through the
+        // normal tool approval.
+        const request = message as { id?: unknown }
+        if (typeof request.id !== 'string') break
+        const requestId = request.id
+        void (async () => {
+          await affinityReady
+          const sessionId = panelActiveSessions.get(port)
+          const resolved = await resolveToolTab(sessionId)
+          if ('ok' in resolved) {
+            try {
+              port.postMessage({
+                type: 'picker.start.result',
+                id: requestId,
+                ok: false,
+                error: { message: resolved.error?.message ?? 'No page is being controlled right now, so there is nothing to pick.' },
+              })
+            } catch { /* port closed */ }
+            return
+          }
+          const tabId = resolved.id
+          if (tabId === undefined) {
+            try {
+              port.postMessage({
+                type: 'picker.start.result',
+                id: requestId,
+                ok: false,
+                error: { message: 'The controlled tab has no id, so it cannot be picked from.' },
+              })
+            } catch { /* port closed */ }
+            return
+          }
+          const outcome = await startPicker(tabId, {
+            listFrames: (target) => listTabFrames(target, resolved.url),
+            sendToFrame: async (target, frameId, payload) => {
+              await chrome.tabs.sendMessage(target, payload, { frameId })
+            },
+            report: (result) => {
+              try { port.postMessage({ type: 'picker.result', result }) } catch { /* port closed */ }
+            },
+          })
+          try {
+            port.postMessage({
+              type: 'picker.start.result',
+              id: requestId,
+              ok: outcome !== undefined,
+              ...(outcome === undefined ? { error: { message: 'A pick is already in progress.' } } : {}),
+            })
+          } catch { /* port closed */ }
+        })()
+        break
+      }
+      case 'picker.cancel': {
+        const request = message as { id?: unknown }
+        void stopPicker().then(() => {
+          if (typeof request.id !== 'string') return
+          try { port.postMessage({ type: 'picker.cancel.result', id: request.id, ok: true }) } catch { /* port closed */ }
+        }).catch(() => undefined)
         break
       }
       case 'selection.clear': {

@@ -229,6 +229,13 @@ export interface PanelCopy {
     screenshotUnsupportedType: string
     /** File name shown on the draft image a capture produced. */
     screenshotName: string
+    /** Toolbar: arm the element picker on the controlled page. */
+    pickElement: string
+    /** Toolbar: the picker is armed; this cancels it. */
+    cancelPick: string
+    /** Error shown when a pick session fails. */
+    pickFailed: string
+    removePickedElement: string
     removeImage: (name: string) => string
     image: string
     imageLoading: string
@@ -559,6 +566,10 @@ const EN: PanelCopy = {
     screenshotUnavailable: 'This dsh host does not advertise image input, so a capture cannot be attached',
     screenshotUnsupportedType: 'This dsh host does not accept PNG images, so a capture cannot be attached',
     screenshotName: 'page capture',
+    pickElement: 'Pick an element on the page',
+    cancelPick: 'Cancel picking',
+    pickFailed: 'The element could not be picked.',
+    removePickedElement: 'Remove the picked element',
     removeImage: (name) => `Remove ${name}`,
     image: 'Image',
     imageLoading: 'Loading…',
@@ -889,6 +900,10 @@ const ZH: PanelCopy = {
     screenshotUnavailable: '当前 dsh 宿主未声明图片输入能力，无法附加截图',
     screenshotUnsupportedType: '当前 dsh 宿主不接受 PNG 图片，无法附加截图',
     screenshotName: '页面截图',
+    pickElement: '在页面上拾取元素',
+    cancelPick: '取消拾取',
+    pickFailed: '拾取元素失败。',
+    removePickedElement: '移除已拾取的元素',
     removeImage: (name) => `移除 ${name}`,
     image: '图片',
     imageLoading: '加载中…',

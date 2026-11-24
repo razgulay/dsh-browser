@@ -13,7 +13,7 @@ import type { BridgeCaps } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
 import type { ServerFrame } from '@yuxianglin/dsh-bridge-browser/src/protocol.ts'
 import type { BridgeState } from '../background/bridge.ts'
 import type { AffinityTab, TabAffinityDecision, TabAffinityState, TabAffinityStatus } from '../background/tab-affinity.ts'
-import { connectPanel, PanelRpcError, type BridgeInstance, type DevToolsStatus, type DiscoveryStatus, type PanelApi, type PanelSettings } from './api.ts'
+import { connectPanel, PanelRpcError, type BridgeInstance, type DevToolsStatus, type DiscoveryStatus, type PanelApi, type PanelSettings, type PickedElementResult } from './api.ts'
 import { renderMarkdown } from './markdown.ts'
 import whaleUrl from '../../assets/icons/deepseek-256.png'
 import type { ApprovalDecision, ApprovalRequest } from '../security/approval.ts'
@@ -31,6 +31,7 @@ import {
   transcriptQuotePromptText,
   type TranscriptQuote,
 } from './transcript-quote.ts'
+import { pickedElementPromptText } from './picked-element.ts'
 
 /** A pending quote plus its position in the transcript's scroll space. */
 interface QuoteOffer {
@@ -423,6 +424,15 @@ function CameraIcon(): React.JSX.Element {
     <svg viewBox="0 0 20 20" aria-hidden="true">
       <path d="M3.5 7.25h2.6l1.1-1.6h5.6l1.1 1.6h2.6a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-12a1 1 0 0 1-1-1v-6.5a1 1 0 0 1 1-1Z" />
       <circle cx="10" cy="11" r="2.6" />
+    </svg>
+  )
+}
+
+/** Arrow cursor: pick an element on the page. */
+function PickIcon(): React.JSX.Element {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M4.5 3.6 15.2 8.9a.4.4 0 0 1-.05.74l-4.3 1.11a1.5 1.5 0 0 0-1.08 1.07l-1.11 4.3a.4.4 0 0 1-.74.05L4.5 3.6Z" />
     </svg>
   )
 }
@@ -867,6 +877,10 @@ export function App(): React.JSX.Element {
    * own trust boundary, this one is captured in this document.
    */
   const [transcriptQuote, setTranscriptQuote] = useState<TranscriptQuote | null>(null)
+  /** An element picked from the page, waiting to travel with the next message. */
+  const [pickedElement, setPickedElement] = useState<PickedElementResult | null>(null)
+  /** A picker session is armed and the page is waiting for a click. */
+  const [picking, setPicking] = useState(false)
   /** A finished transcript highlight waiting to be quoted, if any. */
   const [quoteOffer, setQuoteOffer] = useState<QuoteOffer | null>(null)
   const [imageLimits, setImageLimits] = useState<ImageAttachmentLimits | null>(null)
@@ -2272,6 +2286,39 @@ export function App(): React.JSX.Element {
    * capture is offered as an attachment rather than sent straight away, so the
    * person can look at what was taken before it reaches the model.
    */
+  /**
+   * Arm the element picker, then wait for the background to report an outcome.
+   *
+   * The pick arrives through a listener rather than the start call's promise:
+   * arming succeeds before any click happens, and the click may never come (the
+   * person cancels, navigates, or closes the panel).
+   */
+  async function pickElement(): Promise<void> {
+    if (picking || sendingRef.current) return
+    setError(null)
+    setPicking(true)
+    try {
+      await api.startPicker()
+    } catch (cause) {
+      setPicking(false)
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  // The picker ends for four different reasons, and every one must clear the
+  // armed state: otherwise the toolbar button stays disabled and the page keeps
+  // an overlay the person can no longer dismiss.
+  useEffect(() => api.onPickResult((result) => {
+    setPicking(false)
+    if (result.status === 'picked') setPickedElement(result)
+    else if (result.status === 'error') setError(result.message ?? copy.app.pickFailed)
+  }), [copy.app.pickFailed])
+
+  async function cancelPick(): Promise<void> {
+    setPicking(false)
+    await api.cancelPicker().catch(() => undefined)
+  }
+
   async function captureScreenshot(): Promise<void> {
     const limits = imageLimits
     const sessionId = sessionRef.current
@@ -2377,9 +2424,11 @@ export function App(): React.JSX.Element {
     // A quick-start prompt asks about the whole page, not about a quote.
     const submittedSelection = textOverride === undefined ? selection : null
     const submittedQuote = textOverride === undefined ? transcriptQuote : null
+    const submittedPicked = textOverride === undefined ? pickedElement : null
     const id = sessionRef.current
     // busy state 是异步的：连续回车可能都通过 state 检查——用 ref 同步锁。
-    if ((text === '' && submittedImages.length === 0 && submittedSelection === null && submittedQuote === null)
+    if ((text === '' && submittedImages.length === 0 && submittedSelection === null
+      && submittedQuote === null && submittedPicked === null)
       || busy || addingImagesRef.current || sendingRef.current || sessionChangingRef.current || id === null) return
 
     // A line starting with `/` is a command or a skill, never an ordinary
@@ -2397,7 +2446,8 @@ export function App(): React.JSX.Element {
       return
     }
     if (resolution.kind === 'command') {
-      if (submittedImages.length > 0 || submittedSelection !== null || submittedQuote !== null) {
+      if (submittedImages.length > 0 || submittedSelection !== null || submittedQuote !== null
+        || submittedPicked !== null) {
         setError(copy.app.commandAttachmentsUnsupported)
         return
       }
@@ -2418,6 +2468,7 @@ export function App(): React.JSX.Element {
       // The quote travels with this one prompt; it must not linger into the next.
       setTranscriptQuote(null)
       setQuoteOffer(null)
+      setPickedElement(null)
     }
     setBusy(true)
     setWorking(true)
@@ -2435,9 +2486,11 @@ export function App(): React.JSX.Element {
         sessionId: id,
         mode: 'queue',
         content: promptContent(
-          submittedQuote !== null
-            ? transcriptQuotePromptText(submittedQuote, text)
-            : submittedSelection === null ? text : selectionPromptText(submittedSelection, text),
+          submittedPicked !== null
+            ? pickedElementPromptText(submittedPicked, text)
+            : submittedQuote !== null
+              ? transcriptQuotePromptText(submittedQuote, text)
+              : submittedSelection === null ? text : selectionPromptText(submittedSelection, text),
           submittedImages,
         ),
         ...(clientTimeZone === undefined ? {} : { clientTimeZone }),
@@ -3482,6 +3535,30 @@ export function App(): React.JSX.Element {
               </div>
             </div>
           )}
+          {pickedElement !== null && pickedElement.element !== undefined && (
+            <div className="picked-element">
+              <div className="page-selection-meta">
+                <span className="page-selection-chip" title={pickedElement.element.selector ?? ''}>
+                  <PickIcon />
+                  <span>
+                    {pickedElement.element.tag ?? 'element'}
+                    {pickedElement.element.name === undefined ? '' : ` — ${pickedElement.element.name}`}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={copy.app.removePickedElement}
+                    title={copy.app.removePickedElement}
+                    onClick={() => setPickedElement(null)}
+                  >×</button>
+                </span>
+                {pickedElement.element.selector !== undefined && (
+                  <span className="page-selection-source" title={pickedElement.element.selector}>
+                    {pickedElement.element.selector}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
           {draftImages.length > 0 && (
             <div className="draft-images" aria-label={copy.app.addImages}>
               {draftImages.map((image) => {
@@ -3593,6 +3670,14 @@ export function App(): React.JSX.Element {
                 title={imageLimits === null ? copy.app.screenshotUnavailable : copy.app.captureScreenshot}
                 onClick={() => { void captureScreenshot() }}
               ><CameraIcon /></button>
+              <button
+                type="button"
+                className={`pick-button${picking ? ' armed' : ''}`}
+                aria-pressed={picking}
+                aria-label={picking ? copy.app.cancelPick : copy.app.pickElement}
+                title={picking ? copy.app.cancelPick : copy.app.pickElement}
+                onClick={() => { void (picking ? cancelPick() : pickElement()) }}
+              ><PickIcon /></button>
               <span>{copy.app.composerHelp}</span>
             </span>
             {working ? (
