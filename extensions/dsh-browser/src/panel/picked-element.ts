@@ -34,7 +34,11 @@ export function pickedElementPromptText(picked: PickedElementResult, message: st
   const element = picked.element
   if (element === undefined) return message
   const lines: string[] = []
-  if (element.index !== undefined) lines.push(`index: ${element.index}`)
+  // An inventory number only addresses the controlled tab. A pick from any other
+  // tab is informational: sending its index would make the model click a
+  // same-numbered element on a different page, so the selector is all it gets.
+  const indexUsable = picked.controlled !== false
+  if (element.index !== undefined && indexUsable) lines.push(`index: ${element.index}`)
   if (element.selector !== undefined) lines.push(`selector: ${element.selector}`)
   if (element.tag !== undefined) lines.push(`tag: ${element.tag}`)
   if (element.role !== undefined) lines.push(`role: ${element.role}`)
@@ -49,6 +53,9 @@ export function pickedElementPromptText(picked: PickedElementResult, message: st
     lines.push(`rect: ${x},${y} ${width}×${height}`)
   }
   if (element.masked === true) lines.push('masked: true (form field value withheld)')
+  if (!indexUsable) {
+    lines.push('note: picked from a page the assistant is not controlling; the index is omitted, use the selector after following that tab')
+  }
   // A frame id of 0 is the main document and adds nothing; anything else must be
   // stated, because an inventory number is only meaningful inside its frame.
   if (picked.frameId !== undefined && picked.frameId !== 0) {

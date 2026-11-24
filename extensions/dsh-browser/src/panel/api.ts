@@ -179,6 +179,9 @@ export interface PickedElementResult {
   status: 'picked' | 'cancelled' | 'error'
   frameId?: number
   frameUrl?: string
+  /** Tab the pick came from, and whether that tab is the one an index refers to. */
+  tabId?: number
+  controlled?: boolean
   element?: {
     index?: number
     selector?: string
@@ -253,6 +256,8 @@ function parsePickedElementResult(value: unknown): PickedElementResult | null {
     status: 'picked',
     ...(typeof record.frameId === 'number' ? { frameId: record.frameId } : {}),
     ...(typeof record.frameUrl === 'string' ? { frameUrl: record.frameUrl } : {}),
+    ...(typeof record.tabId === 'number' ? { tabId: record.tabId } : {}),
+    ...(record.controlled === true ? { controlled: true } : {}),
     element: {
       ...(index === undefined ? {} : { index }),
       ...(selector === undefined ? {} : { selector }),
