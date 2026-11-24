@@ -164,4 +164,28 @@ describe('panel camera capture', () => {
     // The press is the consent: no approval frame may be emitted for it.
     expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'approval.request' }))
   })
+
+  it('photographs the page on screen, not the tab bound earlier', async () => {
+    const { captureVisibleTab, onMessage, postMessage, query } = await connectPanelForTest()
+
+    // The panel first binds tab 1 by sending a prompt...
+    onMessage.emit({ type: 'session.active', sessionId: 'session-a' })
+    await vi.waitFor(() => {
+      expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'tab-affinity' }))
+    })
+    // ...then the person switches to another tab, and presses the camera there.
+    query.mockResolvedValue([tab(2)])
+    onMessage.emit({ type: 'screenshot.capture', id: 'shot-visible' })
+
+    await vi.waitFor(() => {
+      expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'screenshot.result',
+        id: 'shot-visible',
+        ok: true,
+      }))
+    })
+    // The old handler refused here ("not the active tab") because it aimed at
+    // the bound tab. The button promises the visible page, so it must succeed.
+    expect(captureVisibleTab).toHaveBeenCalled()
+  })
 })

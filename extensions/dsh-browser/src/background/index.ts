@@ -2041,37 +2041,37 @@ chrome.runtime.onConnect.addListener((port) => {
         break
       }
       case 'screenshot.capture': {
-        // The panel's own camera button. The person pressed it, so no approval
-        // is raised: a prompt asking "may I capture the screen you just asked
-        // me to capture" is noise, and the click is the consent. Everything
-        // else — the active-tab and focused-window guards, the JPEG/PNG
-        // options, the refusal on protected pages — is shared with the model
-        // path, because a second capture route would drift from it.
+        // The panel's own camera button, and the button says "capture the
+        // visible page" — so it photographs what the person is looking at right
+        // now, which is the active tab of the panel's window. It deliberately
+        // does *not* use the controlled tab: after a tab switch those differ,
+        // and the model-path guard would then refuse with "not the active tab",
+        // telling the person their own screen is not on screen.
+        //
+        // No approval is raised either. The press is the consent; a prompt
+        // asking "may I capture the screen you just asked me to capture" is
+        // noise. Both captures still share `dispatchScreenshot`, so the pixel
+        // format, the focused-window staleness guard and the empty-result
+        // refusal cannot drift between the two entrances.
         const request = message as { id?: unknown }
         if (typeof request.id !== 'string') break
         // Narrowed once: the closure below outlives this scope.
         const requestId = request.id
+        const windowId = panelWindows.get(port)
         const reply = (payload: Record<string, unknown>): void => {
           try { port.postMessage({ type: 'screenshot.result', id: requestId, ...payload }) } catch { /* port closed */ }
         }
         void (async () => {
           await affinityReady
-          // Resolve exactly like a tool call would: a panel that has not bound
-          // a tab yet must get the *current* page bound, not a refusal. Reading
-          // `resolveTarget` directly skipped that first-bind step, so pressing
-          // the button before any prompt looked like "no page is controlled".
-          const sessionId = panelActiveSessions.get(port)
-          const resolved = await resolveToolTab(sessionId)
-          if ('ok' in resolved) {
-            // `resolveToolTab` answers with a ToolAnswer when it refuses; its
-            // message already explains which condition failed.
+          const visible = await syncActiveTab(windowId)
+          if (visible === undefined) {
             reply({
               ok: false,
-              error: { message: resolved.error?.message ?? 'No page is being controlled right now, so there is nothing to capture.' },
+              error: { message: 'No visible page could be found in this window, so there is nothing to capture.' },
             })
             return
           }
-          const answer = await dispatchScreenshot(resolved, {
+          const answer = await dispatchScreenshot(visible, {
             id: requestId,
             name: 'browser_screenshot',
             args: {},
