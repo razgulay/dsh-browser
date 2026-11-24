@@ -3,6 +3,7 @@
 **English** | [中文](CHANGELOG.zh-CN.md)
 
 ## latest
+* 2026-11-24 [Fix] Element selectors reported to the model are now short and stable: they anchor at the nearest unique-id ancestor and use `:nth-of-type` instead of a positional `:nth-child` path, so a selector still finds its element after the page inserts an unrelated sibling.
 * 2026-11-23 [Feature] A camera button in the composer captures the page you are looking at and attaches it to your message as a draft image, so you can check the shot before sending it. It works on first use, before any message has bound a tab, and after switching tabs it captures the one now on screen rather than the one bound earlier.
 * 2026-11-23 [Feature] Selecting text in the conversation offers "Quote text" right at the highlight, which attaches that passage to your next message as attributed, fenced quoted text rather than plain typed words; the offer travels with the text when the conversation scrolls, and disappears as soon as you click away.
 * 2026-11-23 [Fix] Sending a message after scrolling up brings the new turn into view, instead of leaving the answer below the fold.
